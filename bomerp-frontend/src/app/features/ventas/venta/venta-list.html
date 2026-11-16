@@ -1,0 +1,349 @@
+  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-0" style="font-weight: 700;">Reporte de Ventas</h2>
+    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.9rem;">
+      Ventas directas o convertidas desde proforma, con su detalle
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-secondary" (click)="exportarExcel()" [disabled]="exportando()">
+      @if (!exportando()) { <app-icono nombre="descargar" /> }
+      {{ exportando() ? 'Generando…' : 'Exportar a Excel' }}
+    </button>
+    <a routerLink="/ventas/nueva" class="btn btn-primary">+ Nueva Venta</a>
+  </div>
+</div>
+
+<!-- ── Filtros ──────────────────────────────────────────── -->
+<div class="card filtros">
+  <div>
+    <label class="form-label" for="fEstado">Estado</label>
+    <select id="fEstado" class="form-select" [(ngModel)]="estado">
+      <option value="">Todos</option>
+      <option value="REGISTRADA">Registrada</option>
+      <option value="ANULADA">Anulada</option>
+    </select>
+  </div>
+  <div>
+    <label class="form-label" for="fDesde">Desde</label>
+    <input id="fDesde" type="date" class="form-control" [(ngModel)]="desde">
+  </div>
+  <div>
+    <label class="form-label" for="fHasta">Hasta</label>
+    <input id="fHasta" type="date" class="form-control" [(ngModel)]="hasta">
+  </div>
+  <div class="filtros-acciones">
+    <button class="btn btn-primary" (click)="buscar()">Buscar</button>
+    <button class="btn btn-outline-secondary" (click)="limpiar()">Limpiar</button>
+    <button class="btn btn-aviso" [class.activo]="vista() === 'ATRASADAS'" [attr.aria-pressed]="vista() === 'ATRASADAS'"
+            (click)="verAtrasadas()"><app-icono nombre="alerta" /> Pagos atrasados</button>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert alert-danger" role="alert"><app-icono nombre="alerta" /> {{ error() }}</div>
+}
+@if (mensaje()) {
+  <div class="alert alert-info" role="status">{{ mensaje() }}
+    @if (devolucionPendiente()) {
+      <a routerLink="/cobranza" [queryParams]="{ vista: 'DEVOLUCIONES' }">Ver devoluciones</a>
+    }
+  </div>
+}
+
+<!-- ── Agregados (computed) ─────────────────────────────── -->
+<div class="agregados">
+  @for (a of agregados(); track a.moneda) {
+    <div class="card kpi"><span>Ventas en {{ a.moneda === 'SOLES' ? 'soles' : 'dólares' }}</span><strong>{{ a.cantidad }}</strong></div>
+    <div class="card kpi"><span>Monto total</span><strong>{{ simbolo(a.moneda) }} {{ a.montoTotal | number: '1.2-2' }}</strong></div>
+    <div class="card kpi"><span>Ticket promedio</span><strong>{{ simbolo(a.moneda) }} {{ a.ticketPromedio | number: '1.2-2' }}</strong></div>
+  } @empty {
+    <div class="card kpi"><span>Ventas registradas</span><strong>0</strong></div>
+  }
+  <div class="card kpi"><span>Anuladas (no suman)</span><strong>{{ cantidadAnuladas() }}</strong></div>
+</div>
+
+<!-- ── Ventas con su detalle ────────────────────────────── -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 70px;"><app-orden campo="id" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">ID</app-orden></th>
+          <th><app-orden campo="cliente" [orden]="orden()" (cambiar)="ordenar($event)">Cliente</app-orden></th>
+          <th class="text-center" style="width: 110px;"><app-orden campo="fecha" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">Fecha</app-orden></th>
+          <th class="text-center" style="width: 90px;">Origen</th>
+          <th class="text-center" style="width: 90px;">Pago</th>
+          <th class="text-center" style="width: 110px;"><app-orden campo="estado" [orden]="orden()" (cambiar)="ordenar($event)">Estado</app-orden></th>
+          <th class="text-center" style="width: 110px;">Cobro</th>
+          <th style="text-align: right; width: 130px;"><app-orden campo="total" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">Total</app-orden></th>
+          <th class="text-center" style="width: 220px;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="9" class="vacio">Cargando…</td></tr>
+        }
+        @for (v of ventasVisibles(); track v.id) {
+          <tr class="venta-row" [class.anulada]="v.estado === 'ANULADA'">
+            <td><span class="badge">#{{ v.id }}</span></td>
+            <td><strong>{{ v.clienteNombre }}</strong>
+              @if (v.estado === 'ANULADA' && (v.anuladoPor || v.motivoAnulacion)) {
+                <div class="motivo-anulacion">Anulada{{ v.fechaAnulacion ? ' el ' + v.fechaAnulacion : '' }}{{ v.anuladoPor ? ' por ' + v.anuladoPor : '' }}{{ v.motivoAnulacion ? ': ' + v.motivoAnulacion : '' }}</div>
+              }
+            </td>
+            <td class="text-center muted">{{ v.fechaVenta }}</td>
+            <td class="text-center">
+              @if (v.proformaOrigenId) {
+                <span class="badge" style="background-color: var(--primary-light); color: var(--primary);">Prof #{{ v.proformaOrigenId }}</span>
+              } @else {
+                <span class="badge" style="background-color: var(--suave); color: var(--text-muted);">Directa</span>
+              }
+            </td>
+            <td class="text-center">{{ getTipoPagoLabel(v.tipoPago) }}</td>
+            <td class="text-center">
+              <span class="badge" [class.badge-success]="v.estado === 'REGISTRADA'" [class.badge-danger]="v.estado === 'ANULADA'">{{ v.estado }}</span>
+              @if (sunat(v); as s) {
+                @if (s.comprobante; as c) {
+                  <div class="sunat-corta"><span class="badge" [class]="claseSunat(c)"
+                       [title]="c.mensaje ?? etiquetaSunat(c)">{{ etiquetaCorta(c) }}</span></div>
+                } @else if (s.porEmitir) {
+                  <div class="sunat-corta"><span class="badge badge-warning" [title]="s.porEmitir">SUNAT: por emitir</span></div>
+                }
+              }
+            </td>
+            <td class="text-center">
+              <span class="badge" [class]="getEstadoPagoClass(v.estadoPago)">{{ v.estadoPago }}</span>
+            </td>
+            <td style="text-align: right; font-weight: 700;">{{ simbolo(v.moneda) }} {{ v.total | number: '1.2-2' }}
+              @if (v.tipoDeduccion !== 'NINGUNA') {
+                <div class="muted" style="font-weight: 400;">{{ v.tipoDeduccion === 'DETRACCION' ? 'Detracción' : 'Retención' }}
+                  {{ v.porcentajeDeduccion | number: '1.0-2' }} %</div>
+              }
+            </td>
+            <td class="text-center acciones">
+              @if (v.comprobanteId) {
+                @if (!sunat(v)?.porEmitir) {
+                  <button class="btn btn-sm btn-outline-secondary" (click)="descargarComprobante(v)" title="Descargar factura o boleta en PDF">PDF</button>
+                }
+              }
+              @if (v.estado === 'REGISTRADA') {
+                @if (v.estadoPago !== 'PAGADO') {
+                  <a class="btn btn-sm btn-primary" routerLink="/cobranza" [queryParams]="{ clienteId: v.clienteId }"
+                     title="Registrar un abono parcial o total en Cobranza">Cobrar</a>
+                }
+                @if (puedeAnular()) {
+                  <button class="btn btn-sm btn-danger" (click)="anular(v)" title="Anular venta">Anular</button>
+                }
+              } @else {
+                @if (!v.comprobanteId) { <span class="muted">—</span> }
+              }
+            </td>
+          </tr>
+          <!-- Detalle real de la venta (viene en la misma respuesta) -->
+          <tr class="detalle-row" [class.anulada]="v.estado === 'ANULADA'">
+            <td></td>
+            <td colspan="8">
+              <table class="detalle">
+                <thead>
+                  <tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. Unit.</th><th class="num">Dscto.</th><th class="num">Subtotal</th></tr>
+                </thead>
+                <tbody>
+                  @for (d of v.detalles; track $index) {
+                    <tr>
+                      <td>{{ d.productoNombre }}</td>
+                      <td class="num">{{ d.cantidad }}</td>
+                      <td class="num">{{ d.precioUnitario | number: '1.2-2' }}
+                        @if (textoPrecio(d, v.moneda); as nota) { <small class="nota-precio">{{ nota }}</small> }
+                      </td>
+                      <td class="num">{{ d.descuentoPorcentaje > 0 ? (d.descuentoPorcentaje | number: '1.0-2') + ' %' : '—' }}</td>
+                      <td class="num">{{ d.subtotalDetalle | number: '1.2-2' }}</td>
+                    </tr>
+                  }
+                  <tr class="pie"><td colspan="4" class="num">Subtotal / IGV</td><td class="num">{{ v.subtotal | number: '1.2-2' }} / {{ v.igv | number: '1.2-2' }}</td></tr>
+                  @if (v.tipoDeduccion !== 'NINGUNA') {
+                    <tr class="pie">
+                      <td colspan="4" class="num">
+                        {{ v.tipoDeduccion === 'DETRACCION' ? 'Detracción (la deposita el cliente en el Banco de la Nación)' : 'Retención del IGV (la retiene el cliente)' }}
+                        {{ v.porcentajeDeduccion | number: '1.0-2' }} % / Neto a cobrar
+                      </td>
+                      <td class="num">{{ v.montoDeduccion | number: '1.2-2' }} / <strong>{{ v.netoACobrar | number: '1.2-2' }}</strong></td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              @if (sunat(v); as s) {
+                <div class="sunat">
+                  @if (s.porEmitir) {
+                    <div class="sunat-linea sunat-problema">
+                      <span class="sunat-doc">Comprobante</span>
+                      <span class="badge badge-warning">Por emitir</span>
+                      <span class="sunat-mensaje">{{ s.porEmitir }}</span>
+                    </div>
+                  }
+                  @for (x of documentosSunat(s); track (x.esNota ? 'n' : 'c') + x.d.id) {
+                    <div class="sunat-linea" [class.sunat-reemplazado]="x.reemplazado"
+                         [class.sunat-problema]="!x.reemplazado && (x.d.fueraDePlazo || x.d.estado === 'RECHAZADO' || (x.d.estado === 'PENDIENTE' && x.d.intentos > 0))">
+                      <span class="sunat-doc">{{ x.titulo }} {{ x.d.numero }}</span>
+                      <span class="badge" [class]="claseSunat(x.d)">{{ etiquetaSunat(x.d, x.reemplazado) }}</span>
+                      @if (x.d.codigo !== null) { <span class="muted">código {{ x.d.codigo }}</span> }
+                      @if (x.d.estado === 'PENDIENTE' && x.d.intentos > 0) { <span class="muted">· {{ x.d.intentos }} intento(s)</span> }
+                      @if (!x.reemplazado && avisoPlazo(x.d); as plazo) { <span class="sunat-plazo">{{ plazo }}</span> }
+                      @if (x.d.mensaje) { <span class="sunat-mensaje">{{ x.d.mensaje }}</span> }
+                      <span class="sunat-acciones">
+                        @if (x.d.tieneXml) {
+                          <button class="btn btn-sm btn-outline-secondary" (click)="descargarSunat(x.d, x.esNota, 'xml')" title="XML firmado tal como se envió a SUNAT">XML</button>
+                        }
+                        @if (x.d.tieneCdr) {
+                          <button class="btn btn-sm btn-outline-secondary" (click)="descargarSunat(x.d, x.esNota, 'cdr')" title="Constancia de recepción de SUNAT (CDR)">CDR</button>
+                        }
+                        @if (x.d.intentos > 0) {
+                          <button class="btn btn-sm btn-outline-secondary" (click)="alternarHistorial(x.d, x.esNota)"
+                                  title="Cada respuesta de SUNAT a este documento, con su constancia">
+                            {{ historialDe(x.d, x.esNota) ? 'Ocultar envíos' : 'Envíos' }}</button>
+                        }
+                        @if (!x.reemplazado && puedeReenviar(x.d)) {
+                          <button class="btn btn-sm btn-primary" (click)="reenviarSunat(x.d, x.esNota)"
+                                  [title]="x.d.estado === 'RECHAZADO' ? 'SUNAT no lo recibió: corrija el dato que indica (p. ej. el cliente) y vuelva a enviarlo con el mismo número' : 'Volver a intentar el envío ahora'">Reenviar</button>
+                        }
+                        @if (!x.esNota && x.d.puedeReemplazar) {
+                          <button class="btn btn-sm btn-primary" (click)="reemplazarSunat(x.d, v)"
+                                  [title]="x.d.fueraDePlazo ? 'Pasó el plazo de envío: emitir un comprobante nuevo, con otro número y fecha de hoy, para esta venta' : 'SUNAT lo rechazó: emitir un comprobante nuevo, con otro número, para esta venta'">Emitir comprobante de reemplazo</button>
+                        }
+                      </span>
+                    </div>
+                    @if (!x.esNota && !x.reemplazado && s.correo; as c) {
+                      <div class="entrega">
+                        <div class="entrega-titulo">Entrega del comprobante</div>
+                        <div class="entrega-fila">
+                          <span class="entrega-dato"><span class="muted">SUNAT</span>
+                            <span class="badge" [class]="claseSunat(x.d)">{{ etiquetaSunat(x.d, false) }}</span></span>
+                          @if (etiquetaAmbiente(c.ambienteEmision); as amb) {
+                            <span class="entrega-dato" title="Ambiente de SUNAT en que se aceptó: queda fijo y solo producción tiene validez tributaria">
+                              <span class="muted">Ambiente</span> {{ amb }}</span>
+                          }
+                          <span class="entrega-dato"><span class="muted">Correo</span>
+                            @if (c.ultimo; as u) {
+                              <span [class]="claseCorreo(u.estado)" [title]="u.estado === 'ENVIADO' ? 'El servidor de correo lo aceptó; no confirma que el cliente lo haya leído' : ''">{{ etiquetaCorreo(u.estado) }}</span>
+                            } @else {
+                              <span class="badge badge-neutro">{{ c.motivoNoSeEnvia ? 'No se envía' : 'Sin enviar' }}</span>
+                            }
+                          </span>
+                          <span class="entrega-dato"><span class="muted">Para</span> {{ c.ultimo?.destinatario ?? c.correoCliente ?? 'el cliente no tiene correo' }}</span>
+                          @if (c.ultimo; as u) {
+                            <span class="entrega-dato"><span class="muted">Intentos</span> {{ u.intentos }}@if (c.envios > 1) { · {{ c.envios }} envíos }</span>
+                          }
+                          <span class="entrega-dato"><span class="muted">Adjuntos</span> PDF y XML firmado</span>
+                        </div>
+                        @if (detalleEntrega(c); as det) { <div class="entrega-detalle">{{ det }}</div> }
+                        @if (c.ultimo?.ultimoError; as err) { <div class="entrega-error">{{ err }}</div> }
+                        <div class="entrega-acciones">
+                          <button class="btn btn-sm btn-outline-secondary" (click)="descargarPdfComprobante(x.d)" title="El PDF que se adjunta al correo">PDF</button>
+                          @if (x.d.tieneXml) {
+                            <button class="btn btn-sm btn-outline-secondary" (click)="descargarSunat(x.d, false, 'xml')" title="XML firmado: el mismo que se adjunta al correo">XML</button>
+                          }
+                          @if (x.d.tieneCdr) {
+                            <button class="btn btn-sm btn-outline-secondary" (click)="descargarSunat(x.d, false, 'cdr')" title="Constancia de recepción de SUNAT">CDR</button>
+                          }
+                          @if (c.envios > 0) {
+                            <button class="btn btn-sm btn-outline-secondary" (click)="alternarHistorialCorreo(c.comprobanteId)">
+                              {{ historialCorreo().has(c.comprobanteId) ? 'Ocultar intentos' : 'Historial de intentos' }}</button>
+                          }
+                          @if (puedeReenviarCorreo(c)) {
+                            <button class="btn btn-sm btn-primary" [disabled]="reenviandoCorreo() === c.comprobanteId"
+                                    (click)="reenviarCorreo(c, x.d.numero)" title="Al correo registrado del cliente, con el PDF y el XML">
+                              {{ c.ultimo ? 'Reenviar por correo' : 'Enviar por correo' }}</button>
+                          }
+                        </div>
+                        @if (historialCorreo().get(c.comprobanteId); as h) {
+                          <div class="sunat-envios">
+                            @for (e of h.historial; track e.id) {
+                              @for (i of e.intentosDetalle; track i.intento) {
+                                <div class="sunat-envio">
+                                  <span class="muted">{{ fechaHora(i.inicio) }} · {{ origenEnvio(e) }} · intento {{ i.intento }}</span>
+                                  <span [class]="claseCorreo(i.resultado)">{{ etiquetaCorreo(i.resultado) }}</span>
+                                  <span class="muted">a {{ e.destinatario }}</span>
+                                  @if (i.mensaje) { <span class="sunat-mensaje">{{ i.mensaje }}</span> }
+                                  @if (i.adjuntos) { <span class="muted entrega-adjuntos">{{ i.adjuntos }}</span> }
+                                </div>
+                              } @empty {
+                                <div class="sunat-envio"><span class="muted">{{ fechaHora(e.fechaCreacion) }} · {{ origenEnvio(e) }}</span>
+                                  <span [class]="claseCorreo(e.estado)">{{ etiquetaCorreo(e.estado) }}</span></div>
+                              }
+                            } @empty {
+                              <div class="muted">Sin envíos por correo.</div>
+                            }
+                          </div>
+                        }
+                      </div>
+                    }
+                    @if (historialDe(x.d, x.esNota); as envios) {
+                      <div class="sunat-envios">
+                        @for (e of envios; track e.id) {
+                          <div class="sunat-envio">
+                            <span class="muted">Intento {{ e.intento }} · {{ e.fecha | date: 'dd/MM/yyyy HH:mm' }}</span>
+                            <span>{{ etiquetaResultado(e) }}</span>
+                            @if (e.codigo !== null) { <span class="muted">código {{ e.codigo }}</span> }
+                            @if (e.mensaje) { <span class="sunat-mensaje">{{ e.mensaje }}</span> }
+                            @if (e.tieneXml) {
+                              <button class="btn btn-sm btn-outline-secondary" (click)="descargarEnvio(x.d, e, 'xml')">XML</button>
+                            }
+                            @if (e.tieneCdr) {
+                              <button class="btn btn-sm btn-outline-secondary" (click)="descargarEnvio(x.d, e, 'cdr')">CDR</button>
+                            }
+                          </div>
+                        } @empty {
+                          <div class="muted">Sin envíos registrados.</div>
+                        }
+                      </div>
+                    }
+                  }
+                </div>
+              }
+            </td>
+          </tr>
+        } @empty {
+          @if (!loading()) {
+            <tr><td colspan="9" class="vacio">No hay ventas con esos filtros.</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+  <!-- ── Diálogo: anular una venta (motivo obligatorio, auditoría M4) ── -->
+  @if (anulacionAbierta(); as a) {
+    <div class="dialogo-fondo" (click)="cerrarAnulacion()">
+      <form class="card dialogo" role="dialog" aria-modal="true" aria-labelledby="tituloAnulacionVenta"
+            (ngSubmit)="anularConMotivo()" (click)="$event.stopPropagation()" novalidate>
+        <h3 id="tituloAnulacionVenta" style="margin: 0 0 4px 0; font-weight: 600;">Anular la venta #{{ a.v.id }}</h3>
+        <p class="muted" style="margin: 0 0 12px 0;">
+          {{ a.v.clienteNombre }} · {{ montoEn(a.v, +a.v.total) }} del {{ a.v.fechaVenta }}.
+          Se restaurará el stock de sus materiales, se cancelarán sus mantenimientos pendientes y se emitirá una nota
+          de crédito por su comprobante. Esta acción no se puede deshacer.
+        </p>
+        @if (a.pagado > 0) {
+          <div class="alert alert-warning" role="alert" style="margin: 0 0 12px 0;">
+            El cliente ya pagó {{ montoEn(a.v, a.pagado) }} de esta venta. Ese monto quedará como devolución pendiente
+            en Cobranza › Devoluciones.
+          </div>
+        }
+        <label class="form-label" for="motivoAnulacionVenta">Motivo</label>
+        <input id="motivoAnulacionVenta" name="motivo" type="text" class="form-control" maxlength="300"
+               [(ngModel)]="motivoAnulacion" [disabled]="anulando()"
+               placeholder="Ej.: el cliente desistió, error en el precio, venta registrada dos veces">
+        @if (errorAnulacion()) {
+          <div class="alert alert-danger" role="alert" style="margin-top: 12px;">{{ errorAnulacion() }}</div>
+        }
+        <div class="d-flex justify-content-end gap-2" style="margin-top: 16px;">
+          <button type="button" class="btn btn-secondary" (click)="cerrarAnulacion()" [disabled]="anulando()">Cancelar</button>
+          <button type="submit" class="btn btn-danger" [disabled]="anulando()">{{ anulando() ? 'Anulando…' : 'Anular venta' }}</button>
+        </div>
+      </form>
+    </div>
+  }
+
+  @if (vista() === 'REPORTE') {
+    <app-paginador [pagina]="pagina()" [tamano]="tamano()" [total]="total()" [totalPaginas]="totalPaginas()"
+                   (paginaCambia)="irAPagina($event)" (tamanoCambia)="cambiarTamano($event)" />
+  }
+</div>

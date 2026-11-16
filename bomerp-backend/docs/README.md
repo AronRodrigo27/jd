@@ -1,0 +1,1180 @@
+# DOCUMENTACIÓN DEL SISTEMA WEB "JD REFRIGERACIÓN" (SGE-JD / BomERP)
+
+> Última revisión contra el código: **08/11/2026** (entrega de comprobantes por correo, ambiente de SUNAT declarado y prueba de integración real). Equipo **CherryTree**.
+> Repositorio: `https://github.com/YWAGNERCS/proyecto-SAC` — backend en la rama `master`, frontend en la rama `frontend`.
+> Publicado en **https://ywagnercs.github.io/proyecto-SAC/** junto con el producto de LP2 (`lp2-demo.md`) y la hoja para el cliente; se actualiza solo al subir cambios de `docs/` a `master`.
+> Lo que no coincide entre el código, esta documentación o la guía del curso está listado en **[5. Por verificar](#por-verificar)**.
+
+---
+
+## Índice
+1. [Documentación funcional](#doc-funcional)
+2. [Documentación técnica](#doc-tecnica)
+3. [Manual de usuario](#manual-usuario)
+4. [Estado y trazabilidad del proyecto](#estado-trazabilidad)
+5. [Por verificar](#por-verificar)
+
+---
+
+<a id="doc-funcional"></a>
+
+## 1. DOCUMENTACIÓN FUNCIONAL (¿Qué hace el sistema?)
+
+### Objetivo general
+Desarrollar e implementar un sistema integral web (ERP/CRM) para JD Refrigeración S.A.C., que centralice y automatice el catálogo de productos, el registro de clientes/proveedores, el flujo completo de proformas y ventas, y la postventa (mantenimientos preventivos), mejorando la eficiencia operativa y la atención al cliente.
+
+### Alcance del proyecto
+
+**Incluye:**
+- Catálogo de productos con soporte multimoneda (soles/dólares) y precio de venta calculado por margen porcentual sobre el costo.
+- Clientes y Proveedores con autocompletado por RUC (SUNAT) y DNI (RENIEC) vía apis.net.pe v1; Decolecta como respaldo opcional.
+- Proformas con exportación a PDF y envío por correo (SMTP).
+- Ventas al contado o a crédito: venta directa (cabecera-detalle) y conversión desde una proforma aceptada; anulación con restauración de stock, nota de crédito y, si el cliente ya pagó, devolución pendiente del dinero.
+- Facturación electrónica con correlativo real por serie y envío directo a SUNAT (SEE - Del Contribuyente) probado en el ambiente beta; en producción falta el usuario SOL y el certificado digital de JD. El ambiente (PRODUCCION o BETA) se declara en `SUNAT_AMBIENTE` y solo se aceptan las direcciones oficiales de SUNAT.
+- Entrega de la factura o boleta por correo al cliente, con el PDF y el XML firmado, solo si tiene validez tributaria: seguimiento de cada envío e intento en Oracle, reintentos, reenvío manual y conciliación (ver [FACTURACION_SUNAT.md](FACTURACION_SUNAT.md), sección 5).
+- Compras con el IGV separado y el último costo de compra en cada producto; precio de una línea editable al vender o cotizar (solo sube, con motivo y permiso); topes de descuento que fija el administrador.
+- Postventa: mantenimientos preventivos con alertas automáticas (tarea programada diaria) y pantalla de agenda (vencidos, próximos, realizado, reprogramar).
+- Inventario: descuento al vender, incremento al comprar y alertas de stock mínimo.
+- Cobranza: ventas a crédito con su saldo, abonos parciales o totales (un pago puede repartirse entre varias ventas), historial de cobros y devoluciones de ventas anuladas.
+- Consultas y reportes dentro de cada módulo: ventas (reporte filtrable, resumen por periodo), cobranza (pendientes y atrasadas) y proformas (pendientes).
+- Panel administrativo web (SPA Angular, en `bomerp-frontend`) con inicio de sesión en Keycloak y permisos por rol.
+
+**Queda explícitamente fuera del alcance:**
+- Módulo de planillas y recursos humanos.
+- Pasarelas de pago online (las ventas se registran como pagadas o a crédito, sin procesar pagos reales).
+- Control de GPS de los técnicos de mantenimiento.
+
+### Módulos (backend)
+
+| # | Módulo | Tipo | Responsable | Estado |
+|---|---|---|---|---|
+| 1 | Catálogo (productos con categoría, categorías, catálogo público) | Maestro | Wilson | ✅ CRUD de productos con categoría (API y SPA) |
+| 2 | Clientes (autocompletado RUC/DNI) | Maestro | Aron | ✅ CRUD con validación de RUC/DNI y duplicados; autocompletado real (apis.net.pe v1) en la SPA |
+| 3 | Proveedores | Maestro | Yoel | ✅ CRUD con validación de RUC/DNI, duplicados (409) y correo; pantalla con búsqueda en SUNAT/RENIEC |
+| 4 | Proformas (+ PDF, + envío por correo, descuento por línea) | Transaccional | Yoel | ✅ Estado CONVERTIDA con el N° de venta; el envío informa qué salió y qué no |
+| 5 | Ventas (directa, desde proforma, crédito, anulación, descuento por línea) | Transaccional | Yoel | ✅ Al anular una venta pagada avisa el monto y deja la devolución en Cobranza |
+| 6 | Compras (incrementa stock) | Transaccional | Wilson | ✅ Valida cantidades, precios y N° de factura; total calculado en el servidor; no acepta la misma factura dos veces |
+| 7 | Inventario (alertas de stock mínimo) | Soporte | Wilson | ✅ |
+| 8 | Postventa (cronograma preventivo automático) | Operativo | Wilson | ✅ Pantalla de agenda en la SPA |
+| 9 | Facturación (Comprobante, XML UBL 2.1) | Integración | Aron | ⚠️ Correlativo real por serie; envío directo a SUNAT probado en beta (facturas, boletas y notas de crédito aceptadas) — faltan las credenciales reales de JD |
+| 10 | Notificaciones (SMTP real + WhatsApp) | Integración | Aron | ⚠️ WhatsApp simulado |
+| 11 | Cobranza (abonos a ventas a crédito, saldos, historial, devoluciones) | Transaccional | Aron | ✅ `Cobro`–`DetalleCobro` (15/10/2026); "Registrar cobro" con `FormArray` y devoluciones de ventas anuladas (25/10/2026); anulación de cobros por el ADMIN, voucher duplicado y quién registró (28/10/2026) |
+| 12 | Seguridad (usuarios, roles, login) | Transversal | — (Keycloak) | ✅ **Keycloak** (S10b, 18/10/2026): realm `bomerp`, roles ADMIN/ASISTENTE; el backend es Resource Server y valida el JWT (RS256, `issuer-uri`) |
+| 13 | Servicios técnicos (órdenes de trabajo, sedes, equipos instalados, contratos) | Transaccional | Por asignar | ✅ (28/10/2026) `OrdenTrabajo`–`MaterialOrden`, `SedeCliente`, `EquipoInstalado` y `ContratoMantenimiento`; detracción y retención en Ventas y Cobranza |
+| — | Frontend (SPA Angular 22) | — | Cada responsable en su módulo | ✅ Operativa en todos los módulos, con login, roles y diseño responsivo (`bomerp-frontend`, rama `frontend`) |
+
+> **Reportes:** no son un módulo. Cada módulo expone sus consultas (decisión del equipo, alineada con el curso). Hoy `ventas-resumen`, `cobranza` y `proformas-pendientes` siguen en el paquete transitorio `reportes` (ver 5).
+
+### Requerimientos Funcionales (RF)
+
+| RF | Descripción | Estado real en el código |
+|---|---|---|
+| RF-01 | **Autenticación:** inicio de sesión con credenciales seguras. | ✅ La SPA redirige a la pantalla de login de Keycloak (Authorization Code + PKCE S256; sin formulario propio ni *Direct access grants*). Keycloak emite el JWT (RS256) y el backend lo valida; las contraseñas viven solo en Keycloak. |
+| RF-02 | **Roles y permisos:** restringir módulos según el rol (Administrador, Asistente). | ✅ ADMIN (Lisandro) y ASISTENTE (Lucy). Catálogo: consultar cualquiera, modificar solo ADMIN; anular ventas, anular cobros, eliminar clientes/proveedores/sedes, cancelar órdenes de trabajo, crear o cancelar contratos y retirar equipos instalados: solo ADMIN; tope de descuento por rol. 401/403 en JSON. La SPA oculta lo que el rol no puede hacer. |
+| RF-03 | **Catálogo de productos:** moneda dual y precio por margen porcentual. | ✅ Precio = costo base × (1 + margen %). CRUD completo de productos, cada uno con su categoría. |
+| RF-04 | **Autocompletado de clientes/proveedores** por RUC/DNI vía API externa. | ✅ apis.net.pe v1 sin token (RUC → SUNAT, DNI → RENIEC), con respaldo en Decolecta si se configura `DECOLECTA_TOKEN`. Valida el formato (400), distingue "no existe" (404) de "servicio ocupado" (503) y guarda las consultas exitosas en memoria. |
+| RF-05 | **Proformas** con cálculo automático de IGV y subtotales. | ✅ |
+| RF-06 | **PDF** formal y corporativo de la proforma. | ✅ Se genera al **enviar** la proforma (no al guardar). |
+| RF-07 | **Envío de proformas por correo** (SMTP). | ✅ `POST /proformas/{id}/enviar`; requiere credenciales SMTP configuradas. Las **facturas y boletas** aceptadas por SUNAT se envían solas al cliente con el PDF y el XML firmado, con seguimiento, reintentos y reenvío (08/11/2026; ver [FACTURACION_SUNAT.md](FACTURACION_SUNAT.md), sección 5). |
+| RF-08 | **Conversión de proforma aceptada en venta** sin redigitar. | ✅ Valida que esté ACEPTADA (409); al convertirla pasa a **CONVERTIDA** y guarda el N° de venta, por lo que ya no se puede aceptar, rechazar, enviar ni convertir de nuevo. Respeta precios, tipo de cambio y descuentos de la proforma. |
+| RF-09 | **Control de créditos** (contado/crédito, deudas pendientes y atrasadas). | ✅ Con saldo por venta (RF-20). |
+| RF-10 | **Facturación electrónica** (estructura UBL 2.1). | ⚠️ Numeración real: correlativo por serie (F001, B001, FC01, BC01) sin saltos ni repetidos. Envío directo a SUNAT con XML UBL 2.1 firmado, probado en el ambiente beta; hasta tener el usuario SOL y el certificado de JD, los comprobantes no tienen validez tributaria. |
+| RF-11 | **Descuento de stock** atómico al vender. | ✅ Solo materiales (`MATERIAL_SERVICIO`); si no alcanza → 409 y no se guarda nada. Los equipos no controlan stock. |
+| RF-12 | **Incremento de stock** al registrar compras. | ✅ |
+| RF-13 | **Alertas de stock mínimo** diarias. | ✅ 8:00 a. m., solo materiales, por correo a `app.notificaciones.correo-oficina` (si está vacío, no se envía). |
+| RF-14 | **Postventa: rutina de mantenimiento** al vender equipos. | ✅ Botón "Implementar rutinas de mantenimiento" en Nueva venta y al convertir una proforma (07/11/2026): el vendedor elige cada cuántos meses (1 a 12), cuántas visitas (1 a 24) y la primera fecha. Solo para equipos de CLIMATIZACIÓN y REFRIGERACIÓN; sin rutina no se programa nada (antes eran siempre 4 visitas a los 3, 6, 9 y 12 meses). |
+| RF-15 | **Postventa: alertas de mantenimiento** (8:00 a. m., próximos 7 días, correo a la oficina). | ✅ Si el correo falla, la alerta no se marca como enviada y se reintenta al día siguiente. |
+| RF-16 | **Reportes** de ingresos y cuentas por cobrar, segmentados por moneda. | ✅ Segmenta soles/dólares y excluye las ventas anuladas. |
+| RF-17 | **Anulación de venta** (nuevo, S09): REGISTRADA → ANULADA. | ✅ `PATCH /ventas/{id}/anular`: restaura stock, cancela los mantenimientos pendientes y emite nota de crédito; 409 si ya estaba anulada. |
+| RF-18 | **Venta en soles o dólares con tipo de cambio** (nuevo, 15/10/2026). | ✅ El vendedor elige la moneda; el tipo de cambio de venta SUNAT del día se propone automáticamente y es editable (1–10). Los precios se convierten, el tipo de cambio queda guardado en la venta (no cambia aunque varíe después), aparece en la factura PDF y en el Excel. Una proforma conserva su tipo de cambio al convertirse en venta (se respeta el monto cotizado). |
+| RF-19 | **Descuento por línea** (nuevo, 15/10/2026) en proformas y ventas. | ✅ % por línea con tope según el rol. Los topes los cambia **solo el administrador** en Configuración › Topes de descuento (tabla `TOPES_DESCUENTO`, 08/11/2026; no se delega y queda en el historial); mientras no los cambie valen `app.descuentos.tope-admin` = 30 y `tope-asistente` = 10. Queda guardado en la línea y sale en la factura y la proforma (columna "Dscto.") y en el Excel. El tope sale del rol del JWT; sin sesión la API responde 401. |
+| RF-20 | **Cobranza con abonos** (nuevo, 15/10/2026). | ✅ `Cobro`–`DetalleCobro`: un pago (fecha, método, N° de operación) se reparte entre una o varias ventas del mismo cliente y moneda. Cada abono ≤ saldo (409); al llegar a 0 la venta pasa a PAGADO. El reporte de cobranza suma saldos, no totales. |
+| RF-21 | **Agenda de Postventa** (nuevo, 15/10/2026). | ✅ Vencidos, próximos N días, realizados y todos, con contacto del cliente y equipos; marcar realizado (fecha y trabajo hecho) o reprogramar (fecha ≥ hoy, con motivo). |
+| RF-22 | **Devolución al anular una venta pagada** (nuevo, 25/10/2026). | ✅ Antes de confirmar la anulación se muestra lo que el cliente ya pagó (al contado o con abonos). Al anular queda una devolución PENDIENTE en Cobranza › Devoluciones; el ADMIN registra fecha, método y N° de operación (DEVUELTA). Una venta solo pasa a PAGADO por sus abonos: ya no existe "marcar como pagada". |
+| RF-23 | **Anulación de cobros y control de pagos duplicados** (nuevo, 28/10/2026). | ✅ Un cobro mal registrado (monto o venta equivocados, pago duplicado, cheque rechazado) lo **anula el ADMIN con un motivo**: no se borra, queda ANULADO con fecha, motivo y usuario, deja de contar en el saldo y sus ventas PAGADAS vuelven a PENDIENTE. No se anula el cobro de una venta ya anulada (ese dinero va por Devoluciones, 409). Al registrar: el mismo N° de operación con el mismo método no entra dos veces (409, sin distinguir mayúsculas ni espacios), la fecha no puede ser anterior a la venta (400) y cada cobro guarda quién lo registró (del token). |
+| RF-24 | **Detracción (SPOT) y retención del IGV** (nuevo, 28/10/2026). | ✅ Sector `SERVICIO` (mano de obra) en productos y marca "agente de retención" en clientes. Al registrar la venta: si incluye servicios y supera S/ 700 → detracción del 12 % (en soles, redondeada a soles enteros); si no, y el cliente es agente de retención y supera S/ 700 → retención del 3 %. Porcentajes y umbral en `app.tributos.*`. La factura muestra la deducción, el neto y la leyenda del SPOT con la cuenta del Banco de la Nación (`app.empresa.cuenta-detracciones`, por confirmar). En Cobranza la constancia de detracción y el comprobante de retención se registran como abonos (métodos `DETRACCION` y `RETENCION`, con N° obligatorio, solo en ventas con esa deducción y hasta lo pendiente). Regla simplificada: confirmar con el contador. |
+| RF-25 | **Órdenes de trabajo** (nuevo, 28/10/2026). | ✅ Instalación, mantenimiento, reparación o visita técnica con técnico, fecha, sede y dirección. PROGRAMADA → REALIZADA (lo hecho, quién lo recibió y materiales usados, que descuentan stock y salen en el kardex) o CANCELADA (solo ADMIN). Una instalación registra los equipos instalados; una de mantenimiento deja la visita REALIZADA. Se factura una vez, solo con servicios. |
+| RF-26 | **Sedes y equipos instalados** (nuevo, 28/10/2026). | ✅ Sedes por cliente (nombre único por cliente). Cada equipo instalado con sede, serie (única por modelo), ubicación, fecha, garantía (0 a 120 meses) y frecuencia de mantenimiento; filtro por garantía vigente; retirarlo (solo ADMIN) cancela sus visitas pendientes. |
+| RF-27 | **Mantenimiento configurable y contratos** (nuevo, 28/10/2026). | ✅ Plan por equipo cada 1, 2, 3, 4, 6 o 12 meses (se programa un año adelante y se extiende al hacer cada visita; reemplaza las visitas de la rutina de su venta). Contratos (solo ADMIN) con fechas (hasta 5 años), frecuencia y monto por visita: sus visitas se programan al crearlos y se cancelan al cancelarlos. |
+| RF-28 | **Permisos delegables** (nuevo, 30/10/2026). | ✅ El ADMIN, desde Configuración › Usuarios y permisos, le da a un asistente operaciones que normalmente son solo suyas, sin hacerlo administrador: anular ventas, anular cobros, registrar devoluciones, editar el catálogo, eliminar clientes/proveedores/sedes, administrar servicios (contratos, cancelar órdenes, dar de baja equipos), registrar ventas con fecha pasada (07/11/2026) y el tope de descuento del administrador. Se guardan en Keycloak como roles `PERM_*` (el backend usa una cuenta de servicio propia, `sgejd-backend`); `SecurityConfig` acepta `ADMIN` o el permiso. Nadie cambia sus propios permisos ni los de un ADMIN (409). El cambio llega a la sesión del asistente en 5 minutos como máximo o al volver a entrar. |
+| RF-29 | **Historial de cambios y de sesiones** (nuevo, 30/10/2026). | ✅ Todo POST/PUT/PATCH/DELETE al panel queda registrado (tabla `HISTORIAL_CAMBIOS`, por un filtro dentro de la cadena de seguridad): usuario, rol y permisos, fecha y hora, IP, módulo, acción en palabras ("Anuló la venta #113", "Intentó eliminar el cliente #5") y resultado (Hecho, Sin permiso, Rechazado con el motivo, Error). Incluye los intentos sin permiso (403). Solo se agrega: la aplicación no lo edita ni lo borra. Pantalla solo ADMIN con filtros por usuario, módulo, resultado y fechas, y una pestaña de inicios de sesión, intentos fallidos y cierres que guarda Keycloak (7 días). |
+| RF-30 | **Cuentas por pagar a proveedores** (nuevo, 31/10/2026). | ✅ La compra se registra al contado (queda PAGADA) o a crédito con 1 a 365 días (PENDIENTE, vence fecha + días). Inventario › Cuentas por pagar lista lo que se debe, la que vence primero arriba, con totales por moneda (por pagar, vencido, vence en 7 días). Pagos parciales con fecha, método y N° de operación (obligatorio salvo efectivo): no superan el saldo, no son anteriores a la compra ni futuros, y el mismo N° con el mismo método a un proveedor no entra dos veces (409). Al cubrir el total la compra pasa a PAGADA; un pago mal registrado se anula con motivo (ADMIN o permiso ANULAR_COBROS) y la compra vuelve a PENDIENTE. Las compras anteriores quedaron como pagadas al contado. |
+| RF-31 | **Ajustes de inventario** (nuevo, 31/10/2026). | ✅ Solo materiales (los equipos no controlan stock). Conteo físico: se escribe cuántas unidades hay y el sistema registra la diferencia. Movimiento: entrada o salida con motivo (stock inicial, merma, dañado, robo o pérdida, devolución al proveedor, otro) y observación obligatoria. Una salida no deja el stock negativo. Cada ajuste guarda el stock antes y después, quién y cuándo; sale en el kardex (Ajuste +/−) y en el historial de cambios. Registrar: ADMIN o permiso AJUSTAR_INVENTARIO. No se editan ni borran: un error se corrige con otro ajuste. |
+| RF-32 | **Rentabilidad** (nuevo, 31/10/2026). | ✅ Cada línea vendida guarda el costo del producto al vender, en la moneda de la venta. Comercial › Rentabilidad (ADMIN o permiso VER_RENTABILIDAD) muestra, para un periodo y en soles (lo vendido en dólares, al tipo de cambio de cada venta): vendido sin IGV, costo, ganancia y % por venta, cliente, producto, categoría y técnico (órdenes realizadas: su facturación de mano de obra menos el costo de mano de obra y los materiales usados). Marca en ámbar lo que deja menos de 10 %. Las ventas anteriores al 31/10/2026 usan el costo del producto de esa fecha (no se guardaba). |
+| RF-33 | **Agenda de técnicos** (nuevo, 31/10/2026). | ✅ La orden de trabajo lleva hora de inicio (opcional) y duración estimada (15 min a 12 h, 2 h por defecto). Un técnico no puede tener dos visitas PROGRAMADAS que se crucen el mismo día (409 con la orden que choca). Servicios › Agenda: semana de lunes a domingo con una fila por técnico; cada visita con horario, cliente y tipo; las que se cruzan, en rojo; "+" en un día libre programa una orden para ese técnico y ese día. |
+| RF-34 | **Ordenar listados por columna** (nuevo, 07/11/2026). | ✅ Clic en el encabezado: A→Z o de menor a mayor, otro clic invierte y el tercero vuelve al orden normal, en las 13 listas. Ventas, Proformas y Compras ordenan en el servidor antes de paginar (`orden=campo,asc\|desc`, columnas permitidas por listado); los montos en dólares se comparan en soles. |
+| RF-35 | **Registrar un cliente sin salir de la venta o proforma** (nuevo, 06/11/2026). | ✅ Botón "Nuevo cliente" junto al selector: abre el formulario de cliente (con búsqueda SUNAT/RENIEC) en un diálogo y lo deja seleccionado; si el RUC/DNI ya existe ofrece "Usar este cliente". |
+
+
+### Requerimientos No Funcionales (RNF)
+
+- **RNF-01 (Arquitectura):** monolito modular en capas (controladores, servicios, repositorios), un módulo por paquete. Los módulos se comunican solo por fachadas de servicio y eventos; `ModularityTests` (Spring Modulith) lo verifica en cada `mvn test` (resuelto el 31/10/2026, ver 5, punto 21).
+- **RNF-02 (Rendimiento):** endpoints por debajo de 1000 ms con carga estándar. Medido el 07/11/2026 con los datos simulados (232 ventas, 219 proformas): las listas completas de ventas y proformas tardaban 570 y 360 ms con 380 y 256 consultas cada una (auditoría M9: una por cada venta para su detalle, cliente y productos). Con `hibernate.default_batch_fetch_size=100`, que carga esas relaciones de a 100 con un `IN (...)`, bajaron a 185 y 155 ms con 7 y 5 consultas, con la misma respuesta. Las usan Inicio, la campana y la orden de trabajo.
+- **RNF-03 (Interoperabilidad):** backend desacoplado del frontend, solo API REST en JSON, versionada en `/api/v1/...`.
+- **RNF-04 (Mantenibilidad e IoC):** inyección de dependencias de Spring; credenciales externalizadas: el backend las lee de variables de entorno o de `application-local.properties`, y Docker y Keycloak de `.env` (ambos ignorados por git, con plantilla `.example`). ✅ Cumplido; ver 5 sobre el historial de git.
+- **RNF-05 (Seguridad):** `/api/v1/admin/**` exige un JWT emitido por Keycloak (RS256, validado por `issuer-uri`); autorización por rol (ADMIN, ASISTENTE) y por permiso delegado (`PERM_*`, RF-28); cada cambio queda en el historial (RF-29). Las contraseñas viven solo en Keycloak, con protección contra fuerza bruta (5 intentos) y política de contraseñas.
+- **RNF-06 (Usabilidad):** la SPA es **responsiva**: barra superior con grupos, buscador global y avisos, y riel de íconos con el nombre de cada módulo al pasar el mouse; bajo 900 px el riel pasa a un menú desplegable (☰) con texto; formularios a una columna y tablas con desplazamiento horizontal en celular (≤ 640 px); el detalle de la venta se muestra como tarjetas.
+- **RNF-07 (Usabilidad):** tema **claro, oscuro o "como el sistema"** (sigue al modo de Windows sin recargar), elegido en Configuración o con el botón sol/luna de la barra; se guarda en el navegador y se aplica antes de cargar la app (sin destello claro). El tema oscuro usa una escala de grises neutros: fondo `#111827`, texto `#F3F4F6`, texto secundario `#9AA3AF`, bordes y gráficos `#D1D5DB`/`#9AA3AF`, y `#F3F4F6` como acento (botones claros con texto oscuro); rojo, verde y ámbar quedan solo para estados y alertas.
+- **RNF-08 (Recuperabilidad):** respaldo **automático diario** de la base (tarea de Windows "SGE-JD respaldo diario", `programar_respaldo.bat`): Data Pump a `C:\SGE-JD\respaldos`, copia a una carpeta fuera de la PC (USB, OneDrive o red) y se conservan los últimos 14; si la PC estaba apagada a la hora, corre al encenderla. Registro en `respaldos\respaldo_automatico.log`.
+- **RNF-09 (Observabilidad):** perfiles dev/prod, logs con `logback-spring.xml` y Actuator `health`/`info` para diagnosticar en producción (S13).
+
+### Casos de uso / Historias de usuario
+
+- **CU-01 (Elaborar proforma):** el vendedor selecciona cliente y productos; el sistema calcula IGV y totales; luego envía el PDF de la proforma al cliente por correo.
+- **CU-02 (Postventa: alertas de mantenimiento):** el sistema revisa a diario, a las 8:00 a. m., los mantenimientos de los próximos 7 días y envía un correo a la oficina con los clientes a contactar.
+- **CU-03 (Vender):** el vendedor registra una venta directa con varias líneas de producto, revisa el total y confirma; el sistema descuenta stock, programa mantenimientos y emite el comprobante.
+- **CU-04 (Anular venta):** el administrador anula una venta registrada indicando el motivo (obligatorio; la venta guarda quién la anuló y por qué, auditoría M4); el sistema devuelve al inventario lo vendido, cancela los mantenimientos pendientes, emite la nota de crédito del comprobante y la venta deja de contar en los reportes. Si el cliente ya había pagado, queda una devolución pendiente que se registra cuando se le devuelve el dinero.
+- **CU-05 (Cobrar):** la asistente registra un pago del cliente y lo reparte entre sus ventas a crédito en esa moneda; ningún abono supera el saldo y la venta pasa a PAGADO al completarse.
+- **CU-06 (Anular cobro):** el administrador anula un cobro mal registrado indicando el motivo; el monto vuelve al saldo de sus ventas y el cobro queda en el historial como anulado.
+- **CU-07 (Programar y cerrar una orden de trabajo):** la asistente programa la visita con técnico, fecha y hora (el sistema rechaza un cruce en la agenda del técnico); al cerrarla registra lo hecho y los materiales usados, que descuentan stock.
+- **CU-08 (Comprar y pagar al proveedor):** la asistente registra la compra al contado o a crédito; las compras a crédito quedan en Cuentas por pagar hasta registrar sus pagos.
+- **CU-09 (Ajustar inventario):** el administrador (o quien tenga el permiso) registra un conteo físico o una merma; el sistema ajusta el stock y lo muestra en el kardex.
+- **CU-10 (Delegar permisos):** el administrador enciende o apaga, para un asistente, operaciones que normalmente son solo suyas.
+- **CU-11 (Revisar el historial y la rentabilidad):** el administrador consulta quién hizo cada cambio y cuánto se ganó por venta, cliente, producto y técnico.
+
+#### Diagrama de casos de uso (UML)
+
+El administrador hereda todo lo que hace la asistente (generalización de actores). Los casos marcados con 🔑 son del administrador y los puede delegar a una asistente con un permiso (RF-28).
+
+```mermaid
+flowchart LR
+    Asis(["👤 Asistente<br/>(Lucy)"])
+    Admin(["👤 Administrador<br/>(Lisandro)"])
+    Reloj(["⏰ Tiempo<br/>(tareas programadas)"])
+    Ext(["🌐 Sistemas externos<br/>SUNAT · RENIEC · correo · Keycloak"])
+    Admin -- "hereda de" --> Asis
+
+    subgraph SGE["SGE-JD"]
+        direction TB
+        cu1([Iniciar sesión])
+        cu2([Registrar cliente o proveedor])
+        cu3([Elaborar y enviar proforma])
+        cu4([Registrar venta])
+        cu5([Registrar cobro])
+        cu6([Programar y cerrar orden de trabajo])
+        cu7([Registrar compra y pago a proveedor])
+        cu8([Consultar kardex, reportes y agenda])
+        cu9([🔑 Anular venta o cobro])
+        cu10([🔑 Editar catálogo y eliminar registros])
+        cu11([🔑 Ajustar inventario])
+        cu12([🔑 Ver rentabilidad])
+        cu13([Delegar permisos])
+        cu14([Revisar historial de cambios])
+        cu15([Enviar alertas de mantenimiento y stock])
+        cu16([Calcular detracción o retención])
+    end
+
+    Asis --- cu1 & cu2 & cu3 & cu4 & cu5 & cu6 & cu7 & cu8
+    Admin --- cu9 & cu10 & cu11 & cu12 & cu13 & cu14
+    Reloj --- cu15
+    cu4 -. "«include»" .-> cu16
+    cu2 -. "consulta" .-> Ext
+    cu1 -. "autentica" .-> Ext
+```
+
+### Modelado de procesos (BPMN AS-IS y TO-BE)
+
+Dos procesos clave del negocio, como se hacen hoy (AS-IS) y con SGE-JD (TO-BE). Cada diagrama está en BPMN 2.0
+estándar en `docs/diagramas/` (`.bpmn`, se abre y edita en [Camunda Modeler](https://camunda.com/download/modeler/) o
+[demo.bpmn.io](https://demo.bpmn.io)) y como imagen (`.svg`). Se generan con `python docs/diagramas/generar_bpmn.py`.
+
+> ⚠️ **Los AS-IS son un borrador.** No hay un registro de cómo trabaja hoy la oficina: se armaron a partir de lo que
+> resuelven los requerimientos, y cada paso dudoso está marcado **[S1]–[S9]** (supuesto). Hay que confirmarlos con
+> Lisandro antes de presentarlos como el proceso real.
+
+#### Proceso 1 · Venta, instalación y cobro
+
+**AS-IS (borrador)**
+
+![AS-IS venta, instalación y cobro](diagramas/asis_venta_servicio.svg)
+
+**TO-BE (con SGE-JD)**
+
+![TO-BE venta, instalación y cobro](diagramas/tobe_venta_servicio.svg)
+
+#### Proceso 2 · Compra, pago al proveedor e inventario
+
+**AS-IS (borrador)**
+
+![AS-IS compra e inventario](diagramas/asis_compra_inventario.svg)
+
+**TO-BE (con SGE-JD)**
+
+![TO-BE compra, cuentas por pagar e inventario](diagramas/tobe_compra_inventario.svg)
+
+#### Supuestos del AS-IS por confirmar con Lisandro
+
+| # | Supuesto | Pregunta para confirmar |
+|---|---|---|
+| S1 | La proforma se arma a mano en Word o Excel | ¿Con qué arman hoy la cotización? ¿Hay una plantilla? |
+| S2 | Lisandro revisa precio y descuento de cada proforma | ¿Lucy puede cotizar sola o todo pasa por Lisandro? |
+| S3 | El stock se confirma mirando el almacén | ¿Llevan algún control de stock (Excel, cuaderno)? |
+| S4 | La factura se emite en el portal de SUNAT (SOL) | ¿Facturan en SUNAT SOL, con un sistema o con un contador? |
+| S5 | Las visitas de los técnicos se recuerdan de memoria o en una agenda | ¿Cómo asignan hoy al técnico y la hora? ¿Han tenido cruces? |
+| S6 | Las deudas de clientes se anotan en un cuaderno o Excel | ¿Cómo saben hoy quién debe y desde cuándo? |
+| S7 | Se nota que falta material cuando se va a usar | ¿Hay un mínimo de stock o un pedido periódico? |
+| S8 | La factura del proveedor se archiva y lo recibido se anota | ¿Dónde registran lo que entra al almacén? |
+| S9 | Las fechas de pago a proveedores se recuerdan | ¿Cómo controlan lo que deben a los proveedores? |
+
+#### Qué cambia del AS-IS al TO-BE
+
+| Problema (AS-IS) | Con SGE-JD (TO-BE) | RF |
+|---|---|---|
+| Precios y descuentos calculados a mano | Precio desde costo y margen, IGV y tope de descuento por usuario | RF-01, RF-19 |
+| Proforma sin seguimiento | Estados (enviada, aceptada, rechazada, vencida, convertida) y PDF por correo | RF-04 |
+| Stock incierto al vender | La venta valida y descuenta el stock; alerta de stock mínimo; ajustes con motivo | RF-07, RF-31 |
+| Facturación y detracción manuales | Comprobante con correlativo y cálculo de detracción o retención | RF-09, RF-24 |
+| Agenda de técnicos de memoria | Órdenes con hora y duración; no deja cruzar dos visitas | RF-25, RF-33 |
+| Deudas de clientes en un cuaderno | Saldo por venta, días de atraso, recordatorio y voucher único | RF-20, RF-23 |
+| Deudas con proveedores sin control | Cuentas por pagar con vencimiento y pagos parciales | RF-30 |
+| Sin saber cuánto se gana | Rentabilidad por venta, cliente, producto y técnico | RF-32 |
+
+---
+
+<a id="doc-tecnica"></a>
+
+## 2. DOCUMENTACIÓN TÉCNICA (¿Cómo está construido?)
+
+### Stack tecnológico (según `pom.xml` y `package.json`)
+
+| Capa | Tecnología |
+|---|---|
+| Lenguaje | Java 21 |
+| Framework | Spring Boot **4.0.7** · Spring Framework 7 (Web MVC, Data JPA, Validation, Security, Mail) |
+| ORM | Hibernate 7.2 (`ddl-auto=update` en dev, `validate` en prod); los `boolean` son `BOOLEAN` nativo de Oracle 23 |
+| Base de datos | Oracle Database 23 Free (Docker `gvenzl/oracle-free:23-slim`, servicio `FREEPDB1`, puerto **1522**) |
+| Seguridad | Spring Security como OAuth2 Resource Server (`spring-boot-starter-security-oauth2-resource-server`) + **Keycloak 26.8** con su propio Postgres 17 (Docker, puerto 38080) |
+| Documentación API | springdoc-openapi 3.0.2, OpenAPI 3.1 (Swagger UI en `/swagger-ui.html`) |
+| JSON | Jackson 3 (`tools.jackson`), con su configuración por defecto |
+| Otras | OpenPDF 1.3.32, Lombok, driver `ojdbc11`; H2 incluido como dependencia (sin perfil configurado) |
+| Frontend | Angular 22 (standalone, signals, zoneless), en `bomerp-frontend` |
+| Íconos | Trazos SVG de línea en `ICONOS` (`menu.ts`) y el componente `<app-icono>`; basados en **Feather Icons** (MIT, © Cole Bemis) y **Lucide** (ISC, © Lucide Contributors), varios tomados o adaptados de ellos. Licencias en `bomerp-frontend/LICENCIAS-TERCEROS.md` |
+
+### Migración a Spring Boot 4.0.7 (22/10/2026)
+
+De 3.3.4 a 4.0.7 (Spring Framework 7, Hibernate 7.2, Jackson 3, Spring Security 7), la versión de la guía del curso (ADR-003). Qué cambió y por qué:
+
+| Cambio | Motivo |
+|---|---|
+| `spring-boot-starter-web` → `-webmvc`; `-oauth2-resource-server` → `-security-oauth2-resource-server`; `-test` → `-webmvc-test` + `-data-jpa-test` | Boot 4 divide los starters por módulo |
+| springdoc 2.6.0 → 3.0.2 | La línea 2.x no funciona con Boot 4; Swagger pasa a OpenAPI 3.1 |
+| `SecurityConfig` y `ConsultaRucClientDecolecta` usan `tools.jackson` | Boot 4 configura Jackson 3. Jackson 2 sigue en el classpath solo porque lo trae springdoc, así que compilaba pero fallaba al ejecutar |
+| `texto()` de Decolecta lee solo valores simples | En Jackson 3, `asText()`/`asString()` lanza excepción sobre un objeto (en Jackson 2 devolvía `""`) |
+| Jackson 3 con su configuración por defecto | Solo cambia el orden de algunos campos del JSON (ahora alfabético); los datos son los mismos y la SPA lee los campos por nombre |
+| **`migracion_boot4_booleanos.sql`**: los 4 `boolean` (`productos.visible_en_catalogo`, `mantenimientos.alerta_enviada`, `proformas.enviado_correo` y `enviado_whatsapp`) pasan de `NUMBER(1)` + CHECK a `BOOLEAN` | Es el tipo que Hibernate 7 usa en Oracle 23; sin el script, intentaba convertirlos en cada arranque y Oracle lo rechazaba. Conserva los valores; `datos_demo.sql` sigue funcionando porque Oracle acepta 1/0 en `BOOLEAN` |
+| `Venta.estado`: `length = 20` en vez de `columnDefinition` | El `columnDefinition` solo servía para agregar la columna con `DEFAULT` (ya existe); en Hibernate 7 provocaba un `ALTER` en cada arranque |
+| Se quitó `spring.jpa.database-platform` | Hibernate 7 detecta el dialecto solo |
+
+**Después de la migración (23-24/10/2026):**
+
+| Cambio | Motivo |
+|---|---|
+| `spring.jpa.open-in-view=false` | Con el valor por defecto, la sesión de Hibernate quedaba abierta hasta escribir el JSON y escondía cargas perezosas fuera de la transacción. Al apagarlo aparecieron 6 endpoints con `LazyInitializationException` |
+| Los services devuelven DTO (`VentaService`, `ProformaService`, `FacturacionService`; nuevos `ComprobanteResponseDTO` y `NotaCreditoResponseDTO`) y se arman dentro del `@Transactional` | Regla de la S3: el controller no toca entidades. Se quitaron las anotaciones de Jackson de `Comprobante`, `NotaCredito`, `Mantenimiento`, `DetalleVenta` y `DetalleCompra` |
+| Filtros y orden de `GET /ventas` y `GET /proformas` pasan del controller al service (`listar(...)`, `readOnly`) | El controller queda delgado |
+| Proforma, Compra y el diálogo "Registrar cobro" de Cobranza con formularios reactivos (`FormArray` tipado), como Venta | Mismo patrón de la S9 en las cuatro pantallas transaccionales: cada línea trae su validación (en Cobranza, el abono no supera el saldo de su venta) y el total sale del formulario |
+| `ProformaRequest`: `@NotEmpty` en ítems y `@Min(1)` en cantidad | Antes se podía guardar una proforma sin productos o con cantidad 0; ahora responde 400 con mensaje |
+
+Verificado de nuevo con `open-in-view=false`: recorrido completo por API como Lisandro (90/90) y como Lucy (84/84), 0 `LazyInitializationException` y 0 `ERROR` en el registro, y los mismos estilos en la SPA a 1280 y 375 px.
+
+Sin configuraciones que fuercen comportamiento antiguo: Hibernate arranca sin ejecutar ningún DDL. Verificado: las respuestas de los GET traen los mismos datos que con 3.3.4, los errores 400/401/403/404 tienen el mismo formato, la matriz de seguridad da 14 de 14, PKCE funciona, los 60 valores booleanos se conservaron, las pruebas de venta (contado, crédito, stock insuficiente, anulación) pasan con rollback y se recorrió la SPA como ADMIN y como ASISTENTE.
+
+### Arquitectura de software
+
+Monolito modular: **un solo proyecto Maven y un solo ejecutable Spring Boot**. Cada módulo es un paquete bajo `com.bomerp` con capas internas:
+
+1. **Controllers**: endpoints REST (`/api/v1/admin/...`, `/api/v1/publico/...`).
+2. **Services**: reglas de negocio y transacciones (`@Transactional`).
+3. **Repositories**: interfaces Spring Data JPA.
+4. **Integrations**: clientes hacia servicios externos detrás de interfaces (`ConsultaRucClient`, `OseClient`, `NotificadorCorreo`, `NotificadorWhatsApp`).
+
+Errores: `GlobalExceptionHandler` traduce excepciones a 400 (validación), 404 (`RecursoNoEncontradoException`), 409 (`ReglaNegocioException`, `StockInsuficienteException`) y 500 sin filtrar detalles.
+
+#### Facturación electrónica: envío directo a SUNAT (06/11/2026)
+
+SGE-JD emite directamente ante SUNAT con las credenciales de JD (**SEE - Del Contribuyente**), sin OSE intermedio. Se activa con `app.facturacion.modo=sunat`; sin esa propiedad el envío es simulado (como antes).
+
+```
+Venta registrada ──► comprobante PENDIENTE (serie y correlativo) ──► se confirma la venta
+      └─► cola de envíos (uno a la vez, con pausa) ──► XML UBL 2.1 (xbuilder) ──► firma con el certificado
+            └─► ZIP ──► SUNAT billService (sendBill, usuario SOL) ──► CDR: código y mensaje
+```
+
+| Código de SUNAT | Estado en SGE-JD |
+|---|---|
+| 0 | ACEPTADO |
+| 4000 o más | OBSERVADO (válido; la observación queda guardada) |
+| 2000-3999 (rechazo con CDR) y 1032 | RECHAZADO definitivo: no es válido y su número ya quedó usado; se emite un **comprobante de reemplazo** |
+| Demás excepciones (p. ej. 0100-1999 con dato mal enviado) | RECHAZADO "no recibido": SUNAT no lo registró; se corrige el dato y se reenvía con el mismo número |
+| 0100-0199, HTTP 401/5xx o sin respuesta | PENDIENTE: se reintenta solo cada 3 minutos (hasta 20 intentos), mientras esté en plazo |
+| Sin registrar en SUNAT pasados 3 días desde la emisión | Fuera de plazo: ya no se envía ni se reenvía; se emite un **comprobante de reemplazo** |
+| 1033 (ya registrado en un envío anterior) | PENDIENTE "por confirmar": sin validez, fuera del reintento automático y con el aviso de verificarlo en SUNAT |
+
+- **Fuera de la transacción de la venta:** la venta no espera a SUNAT (responde en ~1 s) ni se deshace si SUNAT está caída.
+- **Una cola, de uno en uno:** la beta de SUNAT responde HTTP 401 al tercer envío seguido en menos de un segundo.
+- **Respaldo:** por cada comprobante y nota de crédito se guardan el XML firmado, el CDR (constancia de SUNAT), el código, el mensaje y los intentos (`migracion_envio_sunat.sql`).
+- **Nota de crédito:** se crea al anular la venta y sale cuando SUNAT aceptó el original. Si el original fue rechazado, no se anula (no tenía validez).
+- **Plazo de envío de 3 días (informe de rechazos SUNAT D-6, 07/11/2026):** SUNAT recibe facturas y boletas hasta 3 días calendario contados desde el día siguiente a la emisión (RS 003-2023/SUNAT): emitida el 7, hasta el 10 inclusive. Lo que llega después no tiene validez aunque SUNAT lo reciba. Un comprobante que SUNAT todavía no registró (pendiente o excepción) muestra en Ventas "Enviar a SUNAT a más tardar el dd/mm" y, pasado el plazo, "Fuera de plazo: no es válido": el envío automático y el reintento lo dejan (sin llamar a SUNAT), Reenviar responde 409 y se ofrece **Emitir comprobante de reemplazo**, con número nuevo y fecha de hoy. La campana avisa los que vencen hoy o mañana y los que ya vencieron (`GET /facturacion/plazo-envio`). No aplica a lo que SUNAT ya tiene (aceptado, rechazado con CDR o por confirmar) ni a las notas de crédito.
+- **Reintentos sin trabas (revisión externa F-02, 07/11/2026):** el límite de 20 intentos se filtra en la consulta a Oracle, antes de tomar los 20 primeros pendientes; antes, 20 agotados al principio de la lista tapaban para siempre a los siguientes.
+- **Correo al cliente solo con validez (revisión externa F-01, 07/11/2026):** "Su Factura ... ha sido emitida" sale solo si SUNAT la aceptó (o la observó). Un comprobante pendiente, rechazado, del modo simulado o aceptado por la **beta** de SUNAT (que devuelve XML y CDR como la real, pero sin validez; informe D-12) no se envía: el botón responde 409 con el motivo.
+- **Usuario o clave SOL rechazados (informe D-9, 07/11/2026):** SUNAT responde 0101-0106 (encabezado de seguridad, usuario o clave incorrectos, usuario inexistente, inactivo o no válido). Antes se reintentaba 20 veces por comprobante como si SUNAT estuviera caída, con riesgo de bloquear la cuenta SOL. Ahora el primer rechazo **detiene todos los envíos**: ni la cola, ni el reintento automático, ni el botón Reenviar (409) vuelven a llamar a SUNAT, y los comprobantes siguientes quedan pendientes sin gastar intentos. La campana muestra "Envíos a SUNAT detenidos". Se corrigen `SUNAT_USUARIO` y `SUNAT_CLAVE` y se reinicia el backend.
+- **Tipo de comprobante y cliente (informe D-11, 07/11/2026):** al pasar un cliente a persona natural, Clientes borra su RUC. Reenviar una factura que SUNAT no recibió tomaba los datos actuales y salía una factura con DNI, que SUNAT rechaza. Ahora ese reenvío responde 409 y se ofrece el **comprobante de reemplazo**, que sale del tipo que corresponde (boleta para persona natural, factura para empresa). Si el cambio en Clientes fue un error, se corrige y se reenvía el mismo.
+- **El reenvío espera la confirmación (informe D-13):** el botón Reenviar pone el comprobante en la cola recién cuando se confirma la transacción, como el envío normal.
+- **El 1033 no se da por aceptado (informe de rechazos SUNAT D-1, 07/11/2026):** SUNAT responde 1033 cuando ya tiene ese número por un envío anterior, sin CDR y sin decir si fue aceptado o rechazado (p. ej. un rechazado que se reenvió con el mismo número). Antes quedaba ACEPTADO y salía el correo "ha sido emitida"; ahora queda pendiente por confirmar, no se envía al cliente, el reintento automático no lo repite y en Ventas aparece "Por confirmar en SUNAT" sin el botón Reenviar.
+- **Comprobante de reemplazo (informe de rechazos SUNAT D-2 y D-4, 07/11/2026):** un rechazo con CDR (2000-3999, o 1032) deja el comprobante sin validez y su número usado; reenviarlo con el mismo número solo devolvía 1033. Ahora el botón **Reenviar** no aparece (y la API responde 409) y en su lugar está **Emitir comprobante de reemplazo**: emite otro comprobante, con número nuevo de la misma serie y los datos actuales del cliente, para la **misma venta**. La venta, el stock, el cobro y los mantenimientos no cambian. El rechazado queda marcado como reemplazado, con su constancia, y el nuevo apunta a él. Oracle admite un solo comprobante vigente (no reemplazado) por venta (índice `UX_COMPROBANTE_VIGENTE_VENTA`). No se reemplaza un comprobante válido, uno de una venta anulada, ni el mismo rechazado dos veces.
+- **Historial de envíos (D-3):** cada respuesta de SUNAT (intento, fecha, resultado, código, mensaje, XML y CDR) se guarda en `ENVIOS_SUNAT` sin pisar las anteriores: un reenvío ya no borra la constancia del rechazo, que SUNAT exige conservar. En Ventas, el botón **Envíos** de cada comprobante o nota muestra los intentos y descarga el XML y el CDR de cada uno.
+- **Datos fijos al emitir (D-5):** el comprobante guarda el tipo y número de documento, el nombre y la dirección del receptor, y cada línea de la venta guarda la descripción del producto. Editar el cliente o el producto después ya no cambia el XML ni el PDF de un comprobante emitido. Solo un reenvío por excepción (SUNAT no lo recibió) vuelve a tomar los datos del cliente, para que salga el dato corregido.
+- **Ninguna factura de una venta anulada sale sola (auditoría M10, 07/11/2026):** antes de enviar un comprobante se revisa su venta. Si está anulada y no tiene nota de crédito (pasó con la venta #285, anulada antes de que la nota se creara también para comprobantes pendientes), la nota se crea en ese momento y sale después de la factura. Si no se puede crear, el comprobante no se envía y el motivo queda en su registro de envío.
+- **Detracción sin cuenta configurada (D-6, 07/11/2026):** SUNAT rechaza una factura con detracción que no lleva la cuenta de JD en el Banco de la Nación (3034). Antes la factura tomaba número y esperaba PENDIENTE mientras corría su plazo de 3 días. Ahora la venta se guarda **por emitir**, sin comprobante: no usa número ni corre plazo. En Ventas dice "SUNAT: por emitir" con el motivo (sin botón PDF) y la campana la avisa. Al arrancar con `CUENTA_DETRACCIONES` configurada, la emisión automática (cada 3 minutos) le da su comprobante con fecha de ese día. Una venta por emitir que se anula no necesita nota de crédito. Lo decide `OseClient.motivoParaNoEmitir` antes de pedir el correlativo; los comprobantes que ya tenían número desde antes siguen sin enviarse hasta que se configure la cuenta.
+- **El correo** con el comprobante sale recién cuando SUNAT lo acepta.
+- **En pantalla (Ventas):** bajo el estado de cada venta, una etiqueta "SUNAT: aceptado / observado / rechazado / pendiente / simulado"; en el detalle, una línea por comprobante y nota de crédito con el código y el mensaje de SUNAT, las descargas del **XML** firmado y del **CDR**, el botón **Reenviar** (no recibidos por SUNAT ya corregidos, o pendientes con aviso), **Emitir comprobante de reemplazo** (rechazados con CDR) y **Envíos** (historial). Los comprobantes reemplazados siguen debajo, tachados, como historial. Los comprobantes emitidos antes del envío real se muestran como **Simulado (sin envío a SUNAT)**: no tienen validez tributaria.
+- **API:** `GET /api/v1/admin/facturacion/estados?ventaIds=1,2`, `POST /facturacion/{id}/reenviar` (409 si ya fue aceptado, si fue rechazado con CDR o si fue reemplazado), `POST /facturacion/{id}/reemplazar` (409 si no es un rechazo definitivo ni está fuera de plazo), `GET /facturacion/plazo-envio` (por vencer y fuera de plazo, para la campana), `GET /facturacion/{id}/xml` y `/cdr`, `GET /facturacion/{id}/envios` (historial), `GET /facturacion/envios/{envioId}/xml` y `/cdr`, y lo mismo bajo `/facturacion/notas-credito/{id}/...`.
+- **Ambiente beta (pruebas, sin efecto tributario):** `SUNAT_AMBIENTE=BETA` (en desarrollo, `app.sunat.ambiente=BETA` en `application-local.properties`), usuario `MODDATOS` y un certificado de prueba propio (`certificados/beta-prueba.p12`, fuera de git). `SunatBetaTest` hace el envío real con `SUNAT_BETA=1`.
+- **Paso a producción (qué hace JD y cómo se configura):** [FACTURACION_SUNAT.md](FACTURACION_SUNAT.md). En resumen:
+  poner `SUNAT_AMBIENTE=PRODUCCION` y `SUNAT_URL` en `https://e-factura.sunat.gob.pe/ol-ti-itcpfegem/billService` (el ambiente es obligatorio y tiene que corresponder a la dirección oficial; si no, el backend no arranca), `SUNAT_USUARIO`/`SUNAT_CLAVE` por el usuario SOL secundario de JD y `SUNAT_CERT_RUTA`/`SUNAT_CERT_CLAVE` por su Certificado Digital Tributario. Nada de eso va en el código.
+
+#### Stock y operaciones simultáneas (05/11/2026)
+
+Dos personas pueden registrar a la vez operaciones sobre el mismo producto, venta, compra o proforma. Para que
+el resultado sea el mismo que si se hubieran hecho una tras otra:
+
+- **Un solo lugar mueve el stock:** `ProductoService.descontarStock` y `sumarStock`. Ventas, conversión de
+  proformas, anulaciones, compras, órdenes de trabajo y ajustes pasan por ahí. Editar un producto **ya no cambia
+  su stock** (en el formulario queda de solo lectura): el stock cambia solo con movimientos que salen en el kardex.
+- **Cantidades sumadas por producto:** si una venta trae el mismo material en varias líneas, se suman antes de
+  validar (con stock 10, dos líneas de 6 se rechazan: piden 12).
+- **Bloqueo de filas (`SELECT … FOR UPDATE`, `PESSIMISTIC_WRITE`):** los productos se releen bloqueados y en
+  orden de id (sin interbloqueos); la proforma se bloquea al convertirla; la venta, al registrar un cobro; la
+  compra, al registrar un pago a proveedor. La segunda operación espera a que termine la primera y valida con el
+  dato ya actualizado. Si espera más de 10 s responde **409** ("otro usuario está registrando…").
+- **Todo o nada:** se valida el stock de todas las líneas antes de descontar; si algo falla después, la
+  transacción devuelve el stock.
+- **Respaldo en la base:** índice único `UX_VENTAS_PROFORMA` sobre `ventas.proforma_id`
+  (`migracion_proforma_unica.sql`): aunque falle todo lo anterior, una proforma no genera dos ventas.
+
+Probado contra el sistema real con peticiones en paralelo: 8 ventas simultáneas de 1 unidad con stock 4 → 4
+aceptadas, 4 rechazadas (409), stock final 0; dos conversiones simultáneas de la misma proforma → una venta; dos
+cobros simultáneos por el saldo completo → uno aceptado y el otro rechazado ("ya está PAGADA").
+
+#### Límites entre módulos (ADR-002, verificado con Spring Modulith)
+
+Cada paquete directo de `com.bomerp` es un **módulo**. Un módulo solo puede usar de otro su **API**: los paquetes
+`service`, `entity`, `dto` y `event` (marcados con `@NamedInterface` en su `package-info.java`) y las piezas
+compartidas de `config` (`empresa`, `exportacion`, `tipocambio`) y de `seguridad` (`descuento`). Sus `repository` y
+`controller` son internos. Tampoco se permiten ciclos entre módulos.
+
+`ModularityTests` lo verifica en cada `mvn test` con **Spring Modulith 2.0.7**: si alguien usa el repositorio de otro
+módulo o crea un ciclo, la prueba falla y dice qué clase lo hizo. Al activarlo (31/10/2026) había 1 143 avisos; se
+resolvieron así:
+
+- **Eventos en vez de llamadas directas:** al registrar una venta, `VentaService` publica `VentaRegistradaEvent` y
+  **Facturación** (emite el comprobante) y **Postventa** (programa los mantenimientos) reaccionan; al anularla,
+  `VentaAnuladaEvent` lo escuchan Postventa (cancela visitas), Facturación (nota de crédito) y Cobranza (devolución).
+  Corren en la misma transacción: si un oyente falla, la venta no se guarda (igual que antes).
+- **Inversión de dependencias:** el reporte de ventas necesita el número de comprobante; Ventas define la interfaz
+  `ComprobantesDeVenta` y Facturación la implementa, así Ventas no depende de Facturación.
+- **Fachadas en vez de repositorios ajenos:** Facturación, Reportes y Rentabilidad piden los datos a `VentaService`,
+  `ProformaService` y `OrdenTrabajoService` (`registradasEntre`, `pendientesVencidasAl`, `lineasVendidas`,
+  `pendientes`, `realizadasEntre`, `asignarComprobante`).
+- **Cada cosa en su módulo:** la detracción pasó de `config` a `ventas/tributos`, y la seguridad (`SecurityConfig`,
+  permisos, tope de descuento e historial de cambios) a un módulo nuevo `seguridad`. `config` quedó como
+  infraestructura compartida que no depende de nadie.
+- **API de cada módulo:** 73 `package-info.java` con `@NamedInterface`.
+
+Dependencias entre módulos (generado por `ModularityTests` en `target/spring-modulith-docs/`, junto con los diagramas
+PlantUML de Spring Modulith):
+
+```mermaid
+flowchart LR
+    catalogo --> config
+    clientes --> config
+    cobranza --> clientes
+    cobranza --> config
+    cobranza --> facturacion
+    cobranza --> ventas
+    compras --> catalogo
+    compras --> config
+    compras --> proveedores
+    facturacion --> catalogo
+    facturacion --> clientes
+    facturacion --> config
+    facturacion --> notificaciones
+    facturacion --> ventas
+    inventario --> catalogo
+    inventario --> clientes
+    inventario --> compras
+    inventario --> config
+    inventario --> notificaciones
+    inventario --> proveedores
+    inventario --> servicios
+    inventario --> ventas
+    postventa --> catalogo
+    postventa --> clientes
+    postventa --> config
+    postventa --> notificaciones
+    postventa --> ventas
+    proformas --> catalogo
+    proformas --> clientes
+    proformas --> config
+    proformas --> notificaciones
+    proformas --> seguridad
+    proveedores --> clientes
+    proveedores --> config
+    reportes --> catalogo
+    reportes --> clientes
+    reportes --> cobranza
+    reportes --> config
+    reportes --> proformas
+    reportes --> servicios
+    reportes --> ventas
+    seguridad --> config
+    servicios --> catalogo
+    servicios --> clientes
+    servicios --> config
+    servicios --> postventa
+    servicios --> ventas
+    ventas --> catalogo
+    ventas --> clientes
+    ventas --> config
+    ventas --> proformas
+    ventas --> seguridad
+```
+
+### Estructura del código
+
+```text
+src/main/java/com/bomerp/
+├── BomerpApplication.java
+├── catalogo/        categoria/, producto/, productocatalogo/ (catálogo público, DTO sin costo ni margen)
+├── clientes/        cliente/, consultaruc/ (RUC/DNI), general/ (entidad Cliente)
+├── cobranza/        cobro/: Cobro–DetalleCobro, saldos y abonos · devolucion/: devoluciones de ventas anuladas
+├── compras/         compra/, detallecompra/, pago/ (cuentas por pagar)
+├── config/          infraestructura compartida: GlobalExceptionHandler, excepciones, empresa/ (datos de JD), tipocambio/, exportacion/ (Excel)
+├── proformas/       proforma/, itemproforma/, proformarequest/, pdf/ (antes cotizaciones/)
+├── facturacion/     comprobante/, facturacion/, nubefact/, ose/, pdf/, serie/ (correlativo por serie)
+├── inventario/      alertas de stock mínimo, kardex/, ajuste/ (ajustes de inventario)
+├── postventa/       mantenimiento/ (programación y alertas), equipo/ (equipos instalados), contrato/
+├── notificaciones/  correo (real) y WhatsApp (simulado)
+├── proveedores/     proveedor/
+├── reportes/        reportes/ (resúmenes de ventas, cobranza y proformas), rentabilidad/
+├── seguridad/       SecurityConfig (JWT de Keycloak + CORS), PerfilController, permisos/ (delegables, Keycloak), descuento/ (tope por rol), auditoria/ (historial de cambios)
+├── servicios/       orden/: órdenes de trabajo y agenda de técnicos
+└── ventas/          venta/ (event/: VentaRegistradaEvent y VentaAnuladaEvent), detalleventa/, tributos/ (detracción y retención), reporte/
+```
+
+Fuera de `src/`: `docs/` (esta documentación y `LIMITACIONES.md`), `sitio/` (el sitio MkDocs), `scripts/` (arranque, respaldo, restauración y base limpia), `keycloak/` (realm y `configurar_realm.py`), `pruebas-seguridad/` (matriz de permisos), los `migracion_*.sql`, `migracion_bd2/` (lo que el curso de BD2 llevó a la base: tablespace, CHECK, PL/SQL, auditoría, índices, roles y `JD_APP`, redo; ver su README) y `.github/workflows/` (`docs.yml` publica esta documentación y `backend.yml` es la integración continua).
+
+### Modelo de datos (tablas reales, esquema `JDREFRIGERACION`)
+
+| Tabla | Campos clave |
+|---|---|
+| `PRODUCTOS` | id, nombre, **categoria_id** (FK → `CATEGORIAS`), sector (incluye `SERVICIO`, mano de obra), costo_base, margen_porcentaje, moneda, stock_actual, stock_minimo, visible_en_catalogo, **ultimo_costo_compra** y **fecha_ultima_compra** (sin IGV, en la moneda del producto; los pone cada compra, auditoría M1) |
+| `CATEGORIAS` | id, nombre, descripcion (una categoría con productos no se puede eliminar: 409) |
+| `CLIENTES` / `PROVEEDORES` | id, tipo (empresa/natural), ruc, dni, correo, teléfono; en clientes, **agente_retencion** |
+| `SEDES_CLIENTE` | id, cliente_id, nombre (único por cliente), direccion, contacto, telefono |
+| `PROFORMAS` / `ITEMS_PROFORMA` | cabecera-detalle de proforma; la cabecera guarda moneda, **tipo_cambio**, estado (PENDIENTE, ACEPTADA, RECHAZADA, VENCIDA, **CONVERTIDA**) y **venta_id**; cada ítem su precio ya convertido y su **descuento_porcentaje** |
+| `VENTAS` | id, cliente_id, proforma_id, fecha_venta, tipo_pago, dias_credito, fecha_limite_pago, **estado** (REGISTRADA/ANULADA), fecha_anulacion, **anulado_por**, **motivo_anulacion** (`migracion_venta_anulacion.sql`), estado_pago, moneda, **tipo_cambio**, comprobante_id, **tipo_deduccion** (NINGUNA/DETRACCION/RETENCION), porcentaje_deduccion, monto_deduccion |
+| `DETALLE_VENTA` | id, venta_id, producto_id, cantidad, precio_unitario, **descuento_porcentaje**, **descripcion** (nombre del producto al vender), costo_unitario, **precio_catalogo**, **precio_editado_por**, **motivo_precio** (precio editado al registrar, auditoría M1; vacíos = precio de catálogo). `ITEMS_PROFORMA` tiene las mismas tres columnas |
+| `COMPROBANTES.AMBIENTE_EMISION` | ambiente de SUNAT en que se aceptó (PRODUCCION, BETA, SIMULADO, NO_REGISTRADO): fijo una vez registrado (disparador `TRG_COMPROBANTE_AMBIENTE`); solo PRODUCCION se envía por correo. `ENVIOS_SUNAT.AMBIENTE`: el de cada envío (`migracion_ambiente_emision.sql`) |
+| `ENVIOS_CORREO` / `INTENTOS_CORREO` | entrega del comprobante por correo: comprobante_id, destinatario, tipo (AUTOMATICO/MANUAL), estado (PENDIENTE, EN_PROCESO, ENVIADO, FALLIDO, INCIERTO), intentos, último error, message_id, próximo intento; y cada intento con su resultado y los adjuntos (nombre, tamaño, SHA-256). Índice único `UX_ENVIO_CORREO_AUTOMATICO`: un solo envío automático por comprobante (`migracion_envio_correo.sql`) |
+| `TOPES_DESCUENTO` | una sola fila (id = 1): tope_admin, tope_asistente, actualizado_por, fecha_actualizacion. Vacía = los de `application.properties` |
+| `COMPRAS` / `DETALLE_COMPRA` | cabecera-detalle de compra; numero_factura normalizado (`F001-00000123`), total calculado por el servidor **con IGV incluido** (los precios de compra se escriben tal como se pagaron) y separado en **subtotal** e **igv** (total ÷ 1.18, auditoría M2) |
+| `DEVOLUCIONES` | dinero por devolver de una venta anulada que ya estaba pagada: venta_id (único), cliente_id, moneda, monto, estado (PENDIENTE/DEVUELTA), fecha_anulacion, fecha_devolucion, metodo_pago, referencia, notas (`migracion_devoluciones.sql`) |
+| `COBROS` / `DETALLE_COBRO` | pago de un cliente (fecha_cobro, moneda, metodo_pago, referencia, monto_total, **estado** VIGENTE/ANULADO, **registrado_por**, fecha_anulacion, motivo_anulacion, anulado_por) y su reparto por venta (venta_id, monto); solo los VIGENTES cuentan en el saldo (`migracion_cobros_anulacion.sql`) |
+| `COMPROBANTES` | comprobante electrónico (factura o boleta); (serie, número) único; estado_sunat, código, mensaje, XML y CDR del último envío; datos del receptor al emitir (receptor_tipo_doc, receptor_num_doc, receptor_nombre, receptor_direccion); **reemplazado** y **reemplaza_a_id**: una venta tiene un solo comprobante vigente y, si SUNAT rechazó alguno, los reemplazados (`migracion_comprobante_reemplazo.sql`) |
+| `ENVIOS_SUNAT` | historial de envíos: comprobante_id o nota_credito_id (exactamente uno), intento, fecha, resultado, codigo, mensaje, xml, cdr |
+| `NOTAS_CREDITO` | id, serie (FC01/BC01), numero (correlativo por serie), motivo, total, estado_sunat, comprobante_id (FK único → `COMPROBANTES`) |
+| `VENTA_AUDITORIA` | una fila por cada INSERT, UPDATE o DELETE de una venta (trigger `TRG_VENTA_AUDITORIA`): estados antes y después, quién anuló y por qué, usuario Oracle y **programa** (el MODULE de la conexión: "SGE-JD ventas"). Particionada por mes; sin FK, para que sobreviva a un DELETE. `TRG_VENTA_ESTADO_BU`: una venta ANULADA no vuelve atrás y anular exige motivo y quién (`migracion_bd2/03`) |
+| `LOG_ERRORES` | errores del motor PL/SQL (`SP_REGISTRAR_VENTA`, `FN_TOTAL_VENTA`), escritos en su propia transacción (`migracion_bd2/02`) |
+| `SERIES_COMPROBANTE` | serie (PK: F001, B001, FC01, BC01), ultimo_numero — contador del correlativo SUNAT |
+| `MANTENIMIENTOS` | id, **cliente_id**, venta_id, **equipo_id**, **contrato_id** (cada visita viene de uno de los tres: CHECK), fecha_programada, estado, alerta_enviada, fecha_realizada, **tecnico**, **orden_trabajo_id**, notas |
+| `EQUIPOS_INSTALADOS` | id, cliente_id, sede_id, producto_id, numero_serie, ubicacion, fecha_instalacion, meses_garantia, frecuencia_meses, estado (ACTIVO/RETIRADO), venta_id, orden_trabajo_id, notas |
+| `CONTRATOS_MANTENIMIENTO` | id, cliente_id, sede_id, fecha_inicio, fecha_fin, frecuencia_meses, monto_visita, moneda, descripcion, estado (VIGENTE/CANCELADO), registrado_por, motivo_cancelacion |
+| `ORDENES_TRABAJO` / `MATERIALES_ORDEN` | orden (tipo, estado, cliente, sede, venta, mantenimiento, equipo, fecha, técnico, dirección, descripción; al cerrar: fecha_realizada, trabajo_realizado, recibido_por; venta_facturada_id) y sus materiales (producto_id, cantidad, costo_unitario, moneda) |
+
+### Diagrama de clases del dominio (UML)
+
+Entidades JPA principales (`@Entity`) con sus atributos y operaciones de negocio clave. Se omiten ids, getters y setters.
+Cardinalidades tal como están en el código (`@ManyToOne`, `@OneToMany`).
+
+```mermaid
+classDiagram
+    direction LR
+    class Categoria {
+        nombre
+    }
+    class Producto {
+        nombre
+        sector : Sector
+        costoBase : BigDecimal
+        margenPorcentaje : BigDecimal
+        moneda : Moneda
+        stockActual : int
+        stockMinimo : int
+        calcularPrecioVenta() BigDecimal
+        controlaStock() boolean
+        esEquipo() boolean
+        esServicio() boolean
+    }
+    class Sector {
+        <<enumeration>>
+        CLIMATIZACION
+        REFRIGERACION
+        VENTILACION_FORZADA
+        MATERIAL_SERVICIO
+        SERVICIO
+    }
+    class Cliente {
+        nombreORazonSocial
+        ruc
+        dni
+        agenteRetencion
+    }
+    class SedeCliente {
+        nombre
+        direccion
+    }
+    class Proveedor {
+        nombreORazonSocial
+        ruc
+    }
+    class Proforma {
+        fecha
+        moneda
+        estado
+        tipoCambio
+    }
+    class ItemProforma {
+        cantidad
+        precioUnitario
+        descuentoPorcentaje
+    }
+    class Venta {
+        fechaVenta
+        tipoPago : CONTADO/CREDITO
+        estado : REGISTRADA/ANULADA
+        estadoPago : PENDIENTE/PAGADO
+        moneda; tipoCambio
+        tipoDeduccion; montoDeduccion
+        calcularSubtotal() BigDecimal
+        calcularTotal() BigDecimal
+        agregarDetalle(DetalleVenta)
+    }
+    class DetalleVenta {
+        cantidad
+        precioUnitario
+        descuentoPorcentaje
+        costoUnitario
+        calcularSubtotalDetalle()
+    }
+    class Comprobante {
+        serie
+        numero
+        tipo
+    }
+    class NotaCredito {
+        serie
+        numero
+        motivo
+    }
+    class Cobro {
+        fecha
+        metodoPago
+        referencia
+        montoTotal
+        estado : VIGENTE/ANULADO
+    }
+    class DetalleCobro {
+        monto
+    }
+    class Devolucion {
+        monto
+        estado
+    }
+    class Compra {
+        fechaCompra
+        numeroFactura
+        total
+        tipoPago
+        fechaVencimiento
+        estadoPago
+    }
+    class DetalleCompra {
+        cantidad
+        precioUnitarioCompra
+    }
+    class PagoProveedor {
+        fechaPago
+        monto
+        metodo
+        numeroOperacion
+        estado
+    }
+    class AjusteInventario {
+        fecha
+        tipo : ENTRADA/SALIDA
+        cantidad
+        motivo
+        stockAnterior
+        stockNuevo
+    }
+    class OrdenTrabajo {
+        tipo
+        estado
+        fechaProgramada
+        horaInicio
+        duracionMinutos
+        tecnico
+        minutoInicio()
+    }
+    class MaterialOrden {
+        cantidad
+        costoUnitario
+    }
+    class EquipoInstalado {
+        numeroSerie
+        mesesGarantia
+        frecuenciaMeses
+        estado
+    }
+    class ContratoMantenimiento {
+        inicio
+        fin
+        frecuenciaMeses
+        montoPorVisita
+        estado
+    }
+    class Mantenimiento {
+        fechaProgramada
+        estado
+        origen
+    }
+    class RegistroCambio {
+        fechaHora
+        usuario
+        accion
+        resultado
+    }
+
+    Categoria "1" <-- "*" Producto
+    Producto ..> Sector
+    Cliente "1" <-- "*" SedeCliente
+    Cliente "1" <-- "*" Proforma
+    Proforma "1" *-- "1..*" ItemProforma
+    ItemProforma "*" --> "1" Producto
+    Proforma "0..1" <-- "0..1" Venta : origen
+    Cliente "1" <-- "*" Venta
+    Venta "1" *-- "1..*" DetalleVenta
+    DetalleVenta "*" --> "1" Producto
+    Venta "1" <-- "0..1" Comprobante
+    Comprobante "1" <-- "0..1" NotaCredito
+    Cliente "1" <-- "*" Cobro
+    Cobro "1" *-- "1..*" DetalleCobro
+    DetalleCobro "*" --> "1" Venta
+    Venta "1" <-- "0..1" Devolucion
+    Proveedor "1" <-- "*" Compra
+    Compra "1" *-- "1..*" DetalleCompra
+    DetalleCompra "*" --> "1" Producto
+    Compra "1" <-- "*" PagoProveedor
+    Producto "1" <-- "*" AjusteInventario
+    Cliente "1" <-- "*" OrdenTrabajo
+    OrdenTrabajo "*" --> "0..1" SedeCliente
+    OrdenTrabajo "*" --> "0..1" EquipoInstalado
+    OrdenTrabajo "1" *-- "*" MaterialOrden
+    MaterialOrden "*" --> "1" Producto
+    EquipoInstalado "*" --> "1" Producto
+    EquipoInstalado "*" --> "0..1" SedeCliente
+    ContratoMantenimiento "*" --> "1" Cliente
+    Mantenimiento "*" --> "0..1" Venta
+    Mantenimiento "*" --> "0..1" EquipoInstalado
+    Mantenimiento "*" --> "0..1" ContratoMantenimiento
+```
+
+**Patrones visibles en el diagrama:** cabecera-detalle con composición (`Venta`–`DetalleVenta`, `Compra`–`DetalleCompra`,
+`Cobro`–`DetalleCobro`, `OrdenTrabajo`–`MaterialOrden`); muchos a muchos resueltos con una entidad intermedia que guarda
+datos propios (ver la sección siguiente); y anulación lógica en lugar de borrado (`Venta.estado`, `Cobro.estado`,
+`PagoProveedor.estado`), para que el historial no pierda nada.
+
+### Relaciones muchos a muchos
+
+Una venta lleva **varios productos** y un mismo producto aparece en **varias ventas**: eso es una relación muchos a muchos (N:M). En una base relacional no se guarda directo (una fila de `VENTAS` no puede tener "una lista de productos"), así que se pone una **tabla intermedia** donde **cada fila es una línea**: esta venta + este producto + sus datos propios. El N:M queda partido en dos relaciones uno a muchos.
+
+```mermaid
+erDiagram
+  VENTAS ||--|{ DETALLE_VENTA : "tiene líneas"
+  PRODUCTOS ||--o{ DETALLE_VENTA : "aparece en"
+  DETALLE_VENTA {
+    number venta_id FK
+    number producto_id FK
+    number cantidad
+    number precio_unitario
+    number descuento_porcentaje
+  }
+```
+
+Ejemplo (dos ventas y dos productos):
+
+| `DETALLE_VENTA` | venta_id | producto | cantidad | precio_unitario | descuento % |
+|---|---|---|---|---|---|
+| línea 1 | 110 | Tubería de cobre 1/4 | 3 | 52.00 | 30 |
+| línea 2 | 110 | Split inverter 12 000 BTU | 1 | 1,406.25 | 0 |
+| línea 3 | 111 | Tubería de cobre 1/4 | 2 | 52.00 | 5 |
+
+La venta 110 sale dos veces (llevó dos productos) y la tubería también (está en dos ventas).
+
+**Por qué una entidad intermedia y no `@ManyToMany`:** la unión **tiene datos propios** (cantidad, precio, descuento, monto), que no son ni de la venta ni del producto. `@ManyToMany` solo crea una tabla con los dos ids. Además el precio se **copia** en la línea al vender: si mañana sube el producto, la venta de hoy conserva su precio. En código es una entidad con dos `@ManyToOne`, y la cabecera la lista con `@OneToMany(mappedBy = ..., cascade = ALL, orphanRemoval = true)`, de modo que cabecera y líneas se graban en una sola transacción.
+
+| Integrante | Lado A | Tabla del medio | Lado B | Dato propio |
+|---|---|---|---|---|
+| Yoel | `PROFORMAS` | `ITEMS_PROFORMA` | `PRODUCTOS` | cantidad, precio, descuento |
+| Yoel | `VENTAS` | `DETALLE_VENTA` | `PRODUCTOS` | cantidad, precio, descuento |
+| Wilson | `COMPRAS` | `DETALLE_COMPRA` | `PRODUCTOS` | cantidad, precio de compra |
+| Aron | `COBROS` | `DETALLE_COBRO` | **`VENTAS`** | monto abonado |
+| Servicios | `ORDENES_TRABAJO` | `MATERIALES_ORDEN` | `PRODUCTOS` | cantidad, costo del material |
+
+`DETALLE_COBRO` une **cobros con ventas**: un cobro puede pagar varias ventas (una transferencia por dos facturas) y una venta puede recibir varios cobros (paga en partes). El saldo de una venta es su total menos la suma de sus filas en `DETALLE_COBRO`.
+
+En la SPA cada fila de la tabla intermedia es una fila del `FormArray`: "Agregar línea" en Proforma, Venta y Compra, y las filas de abono del diálogo "Registrar cobro".
+
+### Sectores del producto
+
+Cada producto tiene uno de **5 sectores fijos**. A diferencia de la **categoría** (libre, solo para ordenar el catálogo), el sector decide qué reglas le aplica el sistema:
+
+| Sector | Ejemplos | ¿Controla stock? | ¿Programa mantenimientos al venderse? |
+|---|---|---|---|
+| `CLIMATIZACION` | aires split, cassette, piso-techo | No | Si el vendedor elige una rutina (botón "Implementar rutinas de mantenimiento") |
+| `REFRIGERACION` | cámaras frigoríficas, condensadoras | No | Igual que climatización |
+| `VENTILACION_FORZADA` | extractores, inyectores | No | No |
+| `MATERIAL_SERVICIO` | tubería de cobre, gas, manómetros | **Sí** | No |
+| `SERVICIO` | instalación, mantenimiento, reparación (mano de obra) | No | No (la venta lleva detracción si supera S/ 700) |
+
+Los equipos se compran por proyecto y no se almacenan (acuerdo con el cliente), por eso no llevan stock: en la lista de productos su stock se ve como "—", una compra no lo sube y una venta no lo exige; en el kardex figuran sin saldo. Solo los materiales suben con las compras, bajan con las ventas, vuelven al anular y generan alertas de stock mínimo (`Producto.controlaStock()`). Si la venta incluye al menos un equipo de climatización o refrigeración, aparece el botón "Implementar rutinas de mantenimiento": el vendedor elige la frecuencia, las visitas y la primera fecha, y Postventa las programa (`VentaService.validarRutina`, `MantenimientoService.programarParaVenta`).
+
+El precio de venta que muestra el catálogo (sin IGV) es `costo_base × (1 + margen_porcentaje / 100)`, en la moneda del producto. Comprar no lo cambia: la compra guarda en el producto su **último costo de compra** (sin IGV) y, si supera el costo del catálogo, Ventas y Proformas lo avisan en la línea; quien tenga permiso puede **editar el precio de esa línea** (solo subirlo, con motivo) y la rentabilidad usa ese último costo (auditoría M1, 08/11/2026). El precio de compra de cada factura (lo que se le pagó al proveedor) se guarda aparte, en `DETALLE_COMPRA`, y es el que aparece como "c/u" en el historial del proveedor.
+
+### API REST (v1)
+
+| Recurso | Endpoints |
+|---|---|
+| Autenticación | Token: `POST http://localhost:38080/realms/bomerp/protocol/openid-connect/token` (Keycloak) · `GET /api/v1/auth/perfil` (sub, usuario, correo y roles leídos del JWT) · Swagger: botón *Authorize* con el access_token |
+| Tipo de cambio | `GET /api/v1/admin/tipo-cambio?fecha=` (SUNAT vía apis.net.pe; compra y venta, S/ por US$) |
+| Catálogo público | `GET /api/v1/publico/catalogo` (sin login, sin costo ni margen) |
+| Categorías | `GET`, `POST /categorias` · `GET`, `PUT`, `DELETE /categorias/{id}` |
+| Productos | `GET /productos?categoriaId=` · `GET /productos/{id}` · `POST /productos` · `PUT /productos/{id}` · `DELETE /productos/{id}` (409 si ya se usó en ventas, proformas o compras) |
+| Clientes | CRUD `/clientes` (`GET`, `GET /{id}`, `POST`, `PUT`, `DELETE` → 409 si tiene proformas o ventas) · `GET /clientes/autocompletar/ruc/{ruc}` · `GET /clientes/autocompletar/dni/{dni}` |
+| Proveedores | `GET`, `POST /proveedores` · `GET`, `PUT`, `DELETE /proveedores/{id}` · autocompletar RUC/DNI |
+| Proformas | `GET /proformas?estado=&clienteId=` · `POST /proformas` (ítems con `descuentoPorcentaje`) · `POST /proformas/{id}/aceptar` · `/rechazar` · `/enviar` (devuelve qué canal salió) · `POST /proformas/marcar-vencidas` (vencimiento manual; corre solo cada día) |
+| Ventas | `GET /ventas?estado=&desde=&hasta=&clienteId=` · `GET /ventas/exportar` (Excel, mismos filtros) · `GET /ventas/historial-cliente/{clienteId}` · `POST /ventas/directa` · `POST /ventas/desde-proforma/{id}` · `GET /ventas/pagos-atrasados` · `PATCH /ventas/{id}/anular` |
+| Compras | `GET /compras?desde=&hasta=&proveedorId=` · `GET /compras/exportar` (Excel) · `GET /compras/historial-proveedor/{proveedorId}` · `GET /compras/{id}` · `POST /compras` (sube el stock solo de materiales; 400 si cantidad < 1, precio ≤ 0, fecha futura o N° de factura sin formato SERIE-NÚMERO; 409 si esa factura del proveedor ya existe) |
+| Cobranza | `GET /cobranza/por-cobrar?clienteId=` (saldo por venta) · `GET /cobranza/cobros?clienteId=&ventaId=` · `POST /cobranza/cobros` · `POST /cobranza/cobros/{id}/anular` (solo ADMIN; body `{motivo}`) · `GET /cobranza/ventas/{ventaId}/pagado` (lo que se devolvería al anular) · `GET /cobranza/devoluciones?estado=&clienteId=` · `POST /cobranza/devoluciones/{id}/registrar` (solo ADMIN) |
+| Descuentos | `GET /descuentos/tope` (tope % del usuario actual) |
+| Inventario | `GET /inventario/alertas` · `GET /inventario/kardex/{productoId}?desde=&hasta=` · `GET /inventario/kardex/{productoId}/exportar` (Excel) |
+| Servicios | `GET/POST /clientes/{id}/sedes` · `PUT/DELETE /clientes/{id}/sedes/{sedeId}` (eliminar: ADMIN) · `GET /equipos?clienteId=&sedeId=&estado=&enGarantia=` · `POST /equipos` · `PUT /equipos/{id}` · `POST /equipos/{id}/retirar` (ADMIN) · `GET /contratos?clienteId=&estado=` · `POST /contratos` (ADMIN) · `POST /contratos/{id}/cancelar` (ADMIN) · `GET /ordenes?estado=&clienteId=&tecnico=&desde=&hasta=` · `GET /ordenes/tecnicos` · `POST /ordenes` · `PUT /ordenes/{id}` · `POST /ordenes/{id}/cerrar` · `POST /ordenes/{id}/cancelar` (ADMIN) · `POST /ordenes/{id}/facturar` |
+| Postventa | `GET /mantenimientos?vista=VENCIDOS\|PROXIMOS\|REALIZADOS\|TODOS&dias=&clienteId=` · `GET /mantenimientos/resumen` · `PATCH /mantenimientos/{id}/realizado` · `PATCH /mantenimientos/{id}/reprogramar` · `POST /mantenimientos/simular-alerta` |
+| Facturación | `POST /facturacion/emitir/{ventaId}` · `POST /facturacion/{id}/enviar` · `GET /facturacion/ventas/{ventaId}/pdf` (descarga el comprobante) · `GET /facturacion/notas-credito` |
+| Consultas *(transitorio, por mover a ventas, cobranza y proformas)* | `GET /reportes/ventas-resumen?desde=&hasta=` · `GET /reportes/cobranza` · `GET /reportes/proformas-pendientes` |
+
+*(Todas las rutas sin prefijo van bajo `/api/v1/admin`.)*
+
+### Pruebas automáticas (JUnit 5 + Mockito)
+
+`mvn test` corre **215 pruebas** (08/11/2026). Las de reglas de negocio son unitarias: usan repositorios simulados
+(Mockito) y no necesitan Oracle, Keycloak ni Docker, así que tardan segundos. Las marcadas *(Oracle)* son de
+integración y necesitan la base encendida; todas deshacen lo que guardan. La trazabilidad de cada requisito con su
+prueba está en [RTM.md](RTM.md).
+
+| Clase de prueba | Qué protege | Pruebas |
+|---|---|---|
+| `CobranzaServiceTest` | Abono parcial y total, saldo, voucher duplicado, fechas, venta anulada; anular un cobro (motivo, dos veces, devoluciones) | 9 |
+| `CuentasPorPagarServiceTest` | Pagos a proveedores: saldo, contado, fechas, N° de operación, duplicado, compra PAGADA, anulación | 8 |
+| `AjusteInventarioServiceTest` | Conteo físico, merma, stock negativo, equipos, observación obligatoria | 7 |
+| `AuditoriaServiceTest` | Acción en palabras, "Intentó…" en lo denegado, módulo, resultado; nunca tumba la operación | 6 |
+| `PermisosServiceTest` | Permisos delegables: diferencia de roles, no a uno mismo ni a un ADMIN, permiso desconocido | 6 |
+| `AgendaHorarioTest` | Cruces de horario del técnico, bordes exactos, sin hora, medianoche, rango de la agenda | 6 |
+| `CompraServiceTest` | N° de factura, factura duplicada, stock solo de materiales, contado/crédito y vencimiento; subtotal e IGV de la compra y último costo del producto | 5 |
+| `AmbienteSunatTest` | El ambiente de SUNAT se declara y se comprueba contra la dirección oficial: producción y beta con sus direcciones; ambiente obligatorio; ambiente que no corresponde; 9 direcciones no oficiales bloqueadas (intermediario, http, imitación del servidor, otro puerto, parámetros…); el cliente no se construye con una configuración inválida | 5 |
+| `ReglasCorreoComprobanteTest` | Correo del comprobante: solo aceptados u observados en el ambiente de PRODUCCION registrado en el comprobante (no pendientes, rechazados, simulados, reemplazados, de la beta ni sin ambiente registrado) y el ambiente no cambia; destinatario válido; esperas entre reintentos; el XML leído con un analizador seguro (número, tipo, RUC del emisor, fecha, moneda, total y firma; rechaza DOCTYPE/XXE; no toca los bytes; lo que una búsqueda de texto aceptaba por error); nombres de SUNAT; plantilla HTML | 14 |
+| `NotificadorCorreoRealTest` | Contra un servidor SMTP de prueba en la misma PC: el PDF y el XML llegan con sus bytes exactos (en base64), se respeta el Message-ID; si el servidor rechaza, no responde o no está configurado, se informa el error | 5 |
+| `EntregaComprobanteIntegracionTest` (Oracle) | De punta a punta con SUNAT y SMTP simulados: aceptado → ENVIADO con PDF y XML del mismo comprobante; beta (aunque después el servidor pase a producción) y cliente sin correo no se envían; SMTP caído → FALLIDO y reintento; reinicio con pendientes; PDF que falla; XML ajeno; evento repetido; dos trabajadores a la vez; reenvío que pide confirmación; caída entre SMTP y Oracle → INCIERTO; conciliación de aceptados sin envío (respeta margen, ventana y correo); el ambiente no se cambia ni desde SQL; sin duplicados entre automático y manual (el reenvío cancela el reintento programado, un reintento no sale si otro envío ya se entregó, ni la conciliación ni el evento tardío duplican un envío manual) | 17 |
+| `PrecioDeLineaTest` | Auditoría M1 y M2: el precio de una línea solo sube, con permiso y motivo de 5 a 200 caracteres; texto del historial; la compra separa el IGV; el producto guarda el costo de la compra más reciente | 5 |
+| `TopeDescuentoServiceTest` | Topes de descuento: los iniciales, los que fija el administrador (rigen enseguida) y los rechazados (fuera de 0–100 o asistente mayor que administrador) | 3 |
+| `PrecioEditadoIntegracionTest` (Oracle) | La compra separa el IGV y deja el último costo sin tocar el precio; la venta usa ese costo; con permiso sube el precio y guarda las dos cifras; sin permiso, para bajarlo o sin motivo no se registra; el precio editado en la proforma pasa a la venta | 4 |
+| `DeduccionTributariaServiceTest` | Detracción 12 % (soles enteros), retención 3 %, umbral S/ 700, dólares con tipo de cambio | 5 |
+| `FechaVentaYAnulacionTest` | Auditoría M3 y M4: sin fecha o con la de hoy no pide permiso; con permiso hasta 30 días atrás; nunca futura; sin permiso, 403; anular sin motivo o con menos de 5 caracteres no toca la venta | 5 |
+| `VentaFechaPasadaIntegracionTest` (Oracle) | Venta con fecha de hace 10 días: el crédito corre desde ese día y la factura sale hoy; la asistente necesita el permiso; al anular, la venta guarda quién y por qué | 3 |
+| `VentaDirectaValidacionTest` | Auditoría B9: `POST /ventas/directa` sin forma de pago, sin cliente, sin productos o con una línea sin producto o con cantidad 0 responde 400 con el campo y el motivo, sin registrar nada (antes, sin `tipoPago` quedaba como contado) | 3 |
+| `VentaCostoTest` | Costo guardado en cada línea y su conversión de moneda; subtotal, IGV y total | 5 |
+| `RentabilidadServiceTest` | Ganancia en soles, líneas sin costo, rentabilidad por técnico | 4 |
+| `StockProductoTest` | Stock: suma de líneas repetidas, todo o nada, bloqueo en orden de id, equipos sin stock, editar un producto no cambia su stock | 6 |
+| `ModularityTests` (Spring Modulith) | Límites entre módulos y ausencia de ciclos (ADR-002); genera el diagrama de módulos | 2 |
+| `ProductoCrudTest` (integración, Oracle) | Guardar, buscar y actualizar un producto | 3 |
+| `FlujoCompletoEndToEndTest` (punta a punta, Oracle) | S14: producto → proforma → venta con rutina → comprobante → visitas → reporte paginado = suma manual → cobros → 401/403 → anulación → auditoría, sin mocks | 1 |
+| `RutinaMantenimientoIntegracionTest` (Oracle) | Venta real: con rutina se programan sus visitas, sin rutina ninguna | 2 |
+| `RutinaMantenimientoTest` | Rutina de mantenimiento: solo con equipos, rangos, primera fecha | 5 |
+| `ClasificacionCodigosSunatTest` | Qué hace SGE-JD con cada código de SUNAT (incluido 0101-0106: usuario o clave SOL) y lectura de `faultcode` | 20 |
+| `DetraccionSinCuentaTest` | Sin la cuenta de detracciones, una venta con detracción no puede emitirse todavía; con cuenta, o sin detracción, sí; solo la SUNAT de producción da validez, la beta no | 3 |
+| `EnvioSunatServiceTest` | Envío a SUNAT: aceptado, observado, rechazado, sin respuesta, "ya registrado" (1033) sin validez, nota de crédito, reintentos y reenvío; cada respuesta queda en el historial sin pisar la anterior; un rechazo con CDR o un comprobante reemplazado no se reenvía; plazo de 3 días (cuándo vence, a qué estados aplica) y lo que pasó el plazo no se envía ni se reenvía; usuario o clave SOL rechazados detienen todos los envíos; una factura no se reenvía si el cliente ya no tiene RUC; el comprobante de una venta anulada no sale sin su nota. Cada prueba espera a que su cola de envíos termine (auditoría B10) | 25 |
+| `CorreoComprobanteTest` | Al cliente solo se le envía por correo un comprobante aceptado por SUNAT; nunca uno pendiente, rechazado, del modo simulado ni aceptado por la beta | 5 |
+| `ReintentoSunatIntegracionTest` (Oracle) | 25 comprobantes con los intentos agotados al principio de la lista no tapan al siguiente pendiente; uno por confirmar (1033) o fuera de plazo no se reintenta, y uno emitido hace justo 3 días sí | 1 |
+| `ComprobanteReemplazoIntegracionTest` (Oracle) | Reemplazo de un rechazado: número nuevo para la misma venta sin tocar stock, cobro ni mantenimientos; solo rechazos definitivos, no dos veces, no en ventas anuladas; Oracle admite un solo comprobante vigente por venta; receptor y descripción quedan como se emitieron; una excepción reenviada toma el dato corregido; un pendiente fuera de plazo se reemplaza y la campana lo avisa; si el cliente cambió de tipo, no se reenvía y el reemplazo sale del tipo correcto | 9 |
+| `VentaPorEmitirIntegracionTest` (Oracle) | Venta con detracción sin cuenta: se guarda sin comprobante ni número, Ventas y la campana la muestran por emitir, emitirla a mano responde 409; al configurar la cuenta se emite sola con fecha de hoy; anulada, ya no se emite | 2 |
+| `VentaAnuladaSinNotaIntegracionTest` (Oracle) | El caso de la venta #285: venta anulada sin nota → la nota se crea antes de enviar la factura; una anulación normal no la duplica | 2 |
+| `OrdenTest` | Orden por columna: texto en español, números, vacíos al final, dólares en soles | 4 |
+| `SunatBetaTest` (beta real de SUNAT) | Factura, boleta y nota aceptadas y un rechazo real; solo corre con `SUNAT_BETA=1` | 0 por defecto |
+
+La seguridad por rol y permiso se prueba además de punta a punta con `pruebas-seguridad/05_matriz.ps1` (14 casos,
+con Keycloak y el backend encendidos).
+
+### Integración continua (GitHub Actions, 07/11/2026)
+
+Cada `git push` prueba el código solo, sin depender de que alguien corra la suite a mano. El resultado se ve en
+GitHub, pestaña **Actions** (en verde o en rojo, con el resumen de cada clase de prueba).
+
+| Flujo | Rama | Qué hace |
+|---|---|---|
+| `Backend` (`.github/workflows/backend.yml`) | `master` | Java 21: compila y corre las **171 pruebas que no necesitan Oracle** (~20 s). Si falla, guarda los informes de Surefire |
+| `Frontend` (`.github/workflows/frontend.yml`, en la rama `frontend`) | `frontend` | Node 24: `npm ci`, `npm audit --omit=dev --audit-level=high` (falla con una vulnerabilidad alta), `npm run build:prod` (con la verificación de la CSP) y las **33 pruebas** del frontend |
+| `Documentación` (`docs.yml`) | `master` | Publica este sitio (solo si cambia `docs/` o `sitio/`) |
+
+Pruebas del frontend (Vitest, `npx ng test --watch=false`): las reglas de pantalla del comprobante electrónico
+viven en funciones puras para poder probarlas solas. `sunat-documento.spec.ts` (16): etiquetas (aceptado, simulado,
+rechazo con CDR frente a "no recibido", 1033 por confirmar, fuera de plazo, reemplazado), cuándo se ofrece Reenviar o
+el reemplazo y por qué, el aviso del plazo con la fecha local y el orden de las líneas de la venta.
+`avisos-facturacion.spec.ts` (5): los avisos de la campana por vencer, fuera de plazo, envíos detenidos y ventas por
+emitir. `fecha-venta.spec.ts` (3): la fecha real de la venta (hoy, hasta 30 días atrás, nunca futura, en hora local). `precio-editado.spec.ts` (3): el precio editado (solo sube, con motivo), su texto y el aviso de la última compra. `entrega-correo.spec.ts` (5): el estado del correo (distinto del de SUNAT), el ambiente en que se aceptó, cuándo se ofrece reenviar y la confirmación cuando ya se envió o quedó por confirmar.
+
+Las 10 clases marcadas `@Tag("oracle")` (las de integración y la punta a punta, 44 pruebas) usan la base de desarrollo
+con sus datos, que no existe en GitHub: la integración continua las salta (`-DexcludedGroups=oracle`) y se corren en
+la PC con `mvn test`, que sigue corriendo las 215. Las pruebas leen además `src/test/resources/config/application.properties`, que apaga las tareas programadas (reintento a SUNAT y revisión de correos) para que un contexto de Spring que queda vivo no envíe nada a la beta por su cuenta. Los cambios solo de documentación (`docs/`, `*.md`) no disparan
+las pruebas.
+
+### Guía de instalación
+
+1. Instalar **JDK 21**, Maven y Docker Desktop.
+2. Base de datos Oracle en Docker (desde la carpeta que contiene `docker-compose.yml`):
+   - Primera vez: `docker volume create sge-jd-oracle-data` y luego `docker compose up -d`.
+   - Si el contenedor ya existe: `docker start SGE-JD`.
+   - Esperar a que `docker logs SGE-JD` muestre `DATABASE IS READY TO USE!`.
+3. Credenciales locales: copiar `src/main/resources/application-local.properties.example` como `application-local.properties` (está en `.gitignore`) y completar al menos:
+   ```properties
+   spring.datasource.password=<APP_USER_PASSWORD del docker-compose>
+   ```
+   También se aceptan variables de entorno: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `DECOLECTA_TOKEN`, `CORREO_OFICINA`, `CORS_ALLOWED_ORIGINS`, `EMPRESA_TELEFONO`, `EMPRESA_CORREO`, `EMPRESA_WEB` y, para SUNAT, `FACTURACION_MODO`, `SUNAT_AMBIENTE` (obligatorio en modo sunat), `SUNAT_URL`, `SUNAT_USUARIO`, `SUNAT_CLAVE`, `SUNAT_CERT_RUTA`, `SUNAT_CERT_CLAVE`.
+4. Ejecutar `mvn spring-boot:run` (puerto 8080). Swagger: `http://localhost:8080/swagger-ui.html`.
+   - **Probar la API en Swagger:** sin token todo responde 401. Para tener uno:
+     1. En PowerShell, desde `bomerp-backend\pruebas-seguridad`, ejecutar
+        `. .\comun.ps1; Get-Token lisandro | Set-Clipboard`. Toma la clave de `.env` y copia el token al
+        portapapeles sin mostrarlo; con `lucy` se prueba como asistente.
+     2. En Swagger, botón **Authorize** → pegar el token en *Value* (solo el token: Swagger agrega `Bearer`) →
+        **Authorize** → **Close**.
+     3. En cualquier endpoint: **Try it out** → **Execute**.
+
+     El token dura 5 minutos: cuando vuelvan los 401, repetir el paso 1. Swagger solo existe en dev; en el perfil
+     `prod` está apagado (`/swagger-ui` responde 404).
+   - **Identidad (Keycloak):** `docker compose up -d keycloak-db keycloak` (desde `bomerp-backend`). Antes, copiar `.env.example` como `.env` (no se versiona) y poner las contraseñas: las usan `docker compose`, `configurar_realm.py` y `pruebas-seguridad/`. La primera vez Keycloak importa `keycloak/realm-bomerp.json` (realm, roles, clientes y usuarios, sin contraseñas); después ejecutar `python keycloak/configurar_realm.py`, que pone las contraseñas de `.env` (y crea el realm si no existe), los roles de permiso `PERM_*` y el cliente confidencial `sgejd-backend` (cuenta de servicio con `view-users`, `manage-users`, `view-realm` y `view-events`, secreto `KC_BACKEND_SECRET` de `.env`, que el backend lee como `app.keycloak.admin.client-secret`): con él el backend cambia los permisos delegados y lee los eventos de sesión. Historial de cambios: tabla `HISTORIAL_CAMBIOS` (`migracion_historial_cambios.sql`), escrita por `AuditoriaFilter` dentro de la cadena de seguridad, después de leer el token y antes de autorizar, para registrar también los 403. Consola: `http://localhost:38080` (usuario `admin`, contraseña `KC_ADMIN_PASSWORD` de `.env`). Usuarios: `lisandro` (ADMIN) y `lucy` (ASISTENTE). Pruebas: `pruebas-seguridad/05_matriz.ps1`.
+   - **Bases creadas antes del 08/11/2026, tercera migración (ambiente de emisión):** ejecutar una vez `migracion_ambiente_emision.sql`, después de la de correo (columna `AMBIENTE_EMISION` en `COMPROBANTES` con su restricción y el disparador que impide cambiarla, y `AMBIENTE` en `ENVIOS_SUNAT`; los ya aceptados quedan SIMULADO si no tienen XML y NO_REGISTRADO si lo tienen; solo agrega, se puede ejecutar varias veces).
+   - **Bases creadas antes del 08/11/2026, segunda migración (entrega del comprobante por correo):** ejecutar una vez `migracion_envio_correo.sql` (tablas `ENVIOS_CORREO` e `INTENTOS_CORREO` y sus índices; solo crea, no borra nada; se puede ejecutar varias veces).
+   - **Bases creadas antes del 08/11/2026 (IGV de compras, último costo, precio editado y topes):** ejecutar una vez `migracion_costos_precios.sql` (subtotal e IGV en `COMPRAS`, calculados para las ya registradas; último costo de compra en `PRODUCTOS`, tomado de la compra más reciente en su moneda; precio de catálogo, quién y por qué en `DETALLE_VENTA` e `ITEMS_PROFORMA`; tabla `TOPES_DESCUENTO`; se puede ejecutar varias veces). Después, `python keycloak/configurar_realm.py` (con `--prod` en producción) crea el permiso `PERM_EDITAR_PRECIO`.
+   - **Bases creadas antes del 07/11/2026 (quién anuló una venta):** ejecutar una vez `migracion_venta_anulacion.sql` (columnas `ANULADO_POR` y `MOTIVO_ANULACION` en `VENTAS`; en las ya anuladas, quién lo hizo sale del historial de cambios; se puede ejecutar varias veces). Después, `python keycloak/configurar_realm.py` (con `--prod` en producción) crea el permiso `PERM_VENTA_FECHA_PASADA`.
+   - **Bases con la tabla `USUARIOS` (anteriores al 07/11/2026):** ejecutar una vez `migracion_quitar_usuarios.sql` (la borra solo si está vacía; se puede ejecutar varias veces).
+   - **Bases creadas antes del 07/11/2026 (comprobante de reemplazo):** ejecutar una vez `migracion_comprobante_reemplazo.sql` (datos del receptor y estado de reemplazo en `COMPROBANTES`, descripción en `DETALLE_VENTA`, tabla `ENVIOS_SUNAT` con el último envío de cada documento ya guardado; los comprobantes emitidos toman el receptor de los datos actuales del cliente; se puede ejecutar varias veces).
+   - **Bases creadas antes del 28/10/2026 (servicios):** ejecutar una vez `migracion_servicios.sql`, después de `migracion_cobros_anulacion.sql` (sector SERVICIO, agente de retención, deducción de las ventas, métodos DETRACCION/RETENCION, sedes, órdenes de trabajo, equipos instalados, contratos y las columnas nuevas de `MANTENIMIENTOS`; se puede ejecutar varias veces).
+   - **Bases creadas antes del 28/10/2026:** ejecutar una vez `migracion_cobros_anulacion.sql` (columnas de anulación y `registrado_por` en `COBROS`; los cobros existentes quedan VIGENTES; se puede ejecutar varias veces).
+   - **Bases creadas antes del 25/10/2026:** ejecutar una vez `migracion_devoluciones.sql` (crea la tabla `DEVOLUCIONES`; se puede ejecutar varias veces).
+   - **Bases creadas antes del 15/10/2026:** después de arrancar el backend nuevo una vez, ejecutar `migracion_auditoria_altos.sql` (permite el estado CONVERTIDA de las proformas; sin él, convertir una proforma falla con ORA-02290). Se puede ejecutar varias veces.
+   - **Datos de demostración (opcional, 11/11/2026):** `scripts\datos_demo.bat` deja la base de **desarrollo** como nueva. Pide escribir BORRAR, saca un respaldo y ejecuta:
+     - `datos_demo.sql`: borra todos los datos de negocio de todos los módulos, reinicia los ID y carga 8 categorías, 30 productos, 7 proveedores y 8 clientes (empresas reales verificadas en SUNAT; relación comercial ficticia);
+     - `datos_demo_ventas.sql`: **20 ventas por año (2024, 2025 y 2026)**, cada una con su factura F001 aceptada (simulado). Dos de cada tres son al contado; las de crédito tienen sus cobros, salvo una atrasada y una con abono parcial en 2026. Una de cada cuatro viene de una proforma, hay una anulada por año con su nota de crédito, y los equipos tienen sus visitas de mantenimiento. El stock lo dan las compras de enero de cada año.
+
+     No toca los usuarios (Keycloak). Necesita el backend iniciado al menos una vez, para que existan las tablas.
+     ```powershell
+     .\scripts\datos_demo.bat
+     ```
+5. Frontend: en `bomerp-frontend`, `npm install` y `npm start` (puerto 4200).
+
+### Uso diario: encender, apagar, respaldar y limpiar (`scripts/`)
+
+Ya instalado (pasos 1 a 5 hechos una vez), todo se maneja con doble clic en `bomerp-backend/scripts/`. Suponen que `bomerp-backend` y `bomerp-frontend` están en la misma carpeta (si no, `-Frontend <ruta>`).
+
+| Archivo | Qué hace |
+|---|---|
+| `iniciar_sgejd.bat` | Enciende Docker Desktop si hace falta, Oracle (`SGE-JD`), Keycloak (`keycloak-db keycloak`), el backend y el frontend en dos ventanas propias; espera a que cada uno responda y abre `http://localhost:4200`. Lo que ya está encendido lo deja como está. Desde cero tarda unos 85 s |
+| `detener_sgejd.bat` | Apaga frontend, backend, Keycloak y Oracle; los datos quedan. `-Simular` muestra qué apagaría; `-DejarBaseDatos` deja Oracle y Keycloak |
+| `respaldar_sgejd.bat` | Respaldo completo del esquema con Data Pump (`expdp`) en `C:\SGE-JD\respaldos\sgejd_AAAAMMDD_HHMM.dmp` (fuera de los repositorios) |
+| `programar_respaldo.bat [-Destino <carpeta>] [-Hora 18:30] [-Conservar 14]` | Crea la tarea de Windows "SGE-JD respaldo diario" que ejecuta `respaldo_automatico.ps1`: respaldo, copia a `-Destino` (fuera de la PC) y borra los más antiguos. La tarea respalda **solo producción** (`sge-jd-oracle-prod`); si ese día está apagada lo anota como aviso (`-Contenedor SGE-JD` o `auto` solo para probarla en desarrollo). Los archivos se llaman `sgejd_diario_prod_…` o `sgejd_diario_dev_…` y solo esos se rotan (los manuales, como `sgejd_antes_de_…`, nunca se borran solos). `-Quitar` la elimina. Registro en `respaldos\respaldo_automatico.log` |
+| `base_limpia.bat` | Borra los datos marcados `[Prueba]` y todo lo que cuelga de ellos (proformas, ventas, comprobantes, cobros, compras, mantenimientos) y devuelve al stock lo que movieron. Primero hace un **ensayo con ROLLBACK** que muestra cuántas filas borraría, pide escribir `BORRAR` y saca un respaldo; si algo falla, Oracle deshace todo |
+| `base_limpia.bat -Entrega` | Deja la base para el cliente: borra **todos** los movimientos y lo marcado `[Prueba]`, reinicia las series de comprobantes y los contadores de id de los movimientos. Conserva catálogo, clientes y proveedores reales; el stock se ajusta después con el inventario físico |
+| `base_limpia.bat -SoloEnsayo` | Solo el ensayo, sin cambiar nada (también con `-Entrega`) |
+| `datos_demo.bat` | Solo **desarrollo**: deja la base como nueva con datos de demostración (catálogo, clientes, proveedores y 20 ventas por año de 2024 a 2026). Pide escribir BORRAR y respalda antes |
+| `restaurar_sgejd.bat <archivo.dmp>` | Vuelve la base al estado de un respaldo: reemplaza las tablas de `JDREFRIGERACION` por las del archivo (pide escribir `RESTAURAR` y antes saca un respaldo de lo actual). Apagar antes el backend. En producción: `-Contenedor sge-jd-oracle-prod` |
+
+Probado (25/10/2026): un respaldo restaurado en un esquema aparte (`-Esquema`) trajo las 17 tablas con los mismos conteos.
+
+---
+
+<a id="manual-usuario"></a>
+
+## 3. MANUAL DE USUARIO (¿Cómo se opera?)
+
+> 📄 **Antes de usarlo con clientes reales, leer [Qué hace hoy y qué todavía no](LIMITACIONES.md)**: facturación, WhatsApp y correo simulados o sin configurar, respaldos y decisiones pendientes.
+
+### Requisitos de entorno
+- Encender con `iniciar_sgejd.bat` y apagar con `detener_sgejd.bat` (ver *Uso diario* en la sección 2).
+- Navegador actualizado (Chrome, Firefox o Edge).
+- Internet para la consulta de RUC/DNI, el envío de correos y la facturación electrónica real (hoy simulada). Sin internet se puede activar `CONSULTA_DOCUMENTOS_SIMULADO=true`.
+
+### Acceso al sistema
+
+> ⚠️ Credenciales solo de desarrollo. No deben usarse ni documentarse así en un ambiente real.
+
+- Usuarios de Keycloak (realm `bomerp`): `lisandro` (ADMIN) y `lucy` (ASISTENTE) (contraseñas en `bomerp-backend/.env`). Se crean al importar `keycloak/realm-bomerp.json` o con `python keycloak/configurar_realm.py`.
+- Consola de Keycloak: `http://localhost:38080` (usuario `admin`, contraseña `KC_ADMIN_PASSWORD` de `.env`). La antigua tabla `USUARIOS` se borró el 07/11/2026 (`migracion_quitar_usuarios.sql`).
+
+### Flujos de operación
+
+- **Iniciar sesión:** en la SPA (`http://localhost:4200`) pulsar "Iniciar sesión" (o abrir cualquier pantalla): se abre la pantalla de Keycloak, se entra con `lisandro` o `lucy` y se vuelve a la pantalla pedida. La sesión sobrevive un F5 en la misma pestaña y el token se renueva solo; "Salir" la cierra también en Keycloak. Junto al nombre se muestra el rol, y el ADMIN ve además "+ Producto" en el menú.
+- **Acceso denegado:** si un usuario abre una pantalla de su rol no permitido (por ejemplo, Lucy en *Nuevo producto*), la SPA muestra "Acceso denegado"; aunque la saltara, el backend respondería 403.
+- **Registrar proveedor:** Proveedores → "+ Nuevo Proveedor" → elegir empresa o persona natural → escribir el RUC o DNI → "Buscar en SUNAT/RENIEC" (llena nombre y dirección; avisa si ya está registrado) → completar teléfono, correo y contacto → Guardar.
+- **Registrar cliente:** Clientes → "+ Nuevo Cliente" → empresa (RUC) o persona natural (DNI) → "Buscar en SUNAT/RENIEC" (llena nombre y dirección; avisa si ya está registrado) → completar teléfono y correo → Guardar. Si aparece "servicio ocupado", esperar unos segundos (apis.net.pe limita las consultas seguidas).
+- **Venta directa:** Ventas → Nueva venta → elegir cliente y forma de pago → (si se registra tarde) poner la **fecha de la venta**: hasta 30 días atrás, solo el administrador o quien tenga el permiso "Ventas con fecha pasada"; el crédito y el tipo de cambio se toman de ese día y la factura sale con fecha de hoy → agregar líneas buscando el producto por nombre (muestra precio y stock) → si se negoció, escribir el descuento % de la línea (hasta el tope del usuario) → si el producto se compró más caro, la línea lo avisa ("Última compra: …"); el administrador o quien tenga el permiso "Editar precio en la venta" pulsa **Editar precio**, escribe el nuevo precio (solo puede subir; para bajarlo está el descuento) y el motivo. El catálogo no cambia; la venta guarda el precio de catálogo, el cobrado, quién y por qué, y el historial de cambios lo registra → revisar subtotal, IGV y total → Registrar y confirmar el resumen.
+- **Proformas:** "+ Nueva Proforma" → cliente, moneda y líneas (con descuento % opcional) → Guardar. En la lista: "📤 Enviar" muestra si salió el correo y si el cliente no tiene teléfono o correo; ✓ acepta; ✗ rechaza (pide confirmación). Una proforma convertida muestra "Venta #N".
+- **Convertir proforma en venta:** la proforma debe estar ACEPTADA. Un diálogo muestra el resumen (cliente, subtotal, IGV, total, tipo de cambio de la proforma) y pide la forma de pago: contado (queda PAGADA) o crédito con días entre 1 y 365 (queda PENDIENTE con fecha límite). Con el permiso, también la fecha real de la venta (hasta 30 días atrás). Al confirmar, el sistema descuenta stock, programa mantenimientos y genera el comprobante; si algo falla (falta stock, ya convertida, no aceptada) se muestra el motivo en el mismo diálogo.
+- **Reporte de ventas:** Ventas → filtros por estado y rango de fechas (botón "Buscar"); muestra totales por moneda, ticket promedio y el detalle de cada venta.
+- **Anular una venta:** en el reporte, botón "Anular" (solo en ventas REGISTRADAS) → escribir el **motivo** (al menos 5 caracteres) → "Anular venta"; la venta queda como "Anulada el … por …: motivo". El stock de los materiales se restaura. Si el cliente ya había pagado (al contado o con abonos), el aviso muestra cuánto: ese monto queda como devolución pendiente en Cobranza › Devoluciones.
+- **Reportes financieros (API):** `/api/v1/admin/reportes/ventas-resumen`, `/cobranza` y `/proformas-pendientes`.
+- **Moneda y tipo de cambio:** al vender o cotizar se elige soles o dólares; el tipo de cambio de SUNAT del día se carga solo y se puede cambiar si se negoció otro. Los productos en la otra moneda se convierten; el tipo de cambio queda guardado en la venta y sale en la factura.
+- **Exportar a Excel:** Ventas y Compras tienen "⬇ Exportar a Excel": descarga un .xlsx con los filtros de la pantalla, con una hoja de cabeceras (cliente/proveedor con RUC, pago, estado, comprobante, totales por moneda) y otra con el detalle línea por línea.
+- **Descargar comprobante:** en el reporte de ventas, el botón "PDF" descarga la factura o boleta de esa venta.
+- **Historial:** en Clientes y Proveedores, el botón "Historial" muestra todas sus ventas o compras, los totales por moneda y lo pendiente de pago, exportable a Excel.
+- **Kardex:** en Productos, el botón "Kardex" lista las entradas (compras), salidas (ventas) y devoluciones (anulaciones) con el saldo de stock después de cada movimiento, con filtro por fechas y exportable a Excel.
+- **Órdenes de trabajo:** menú Servicios › Órdenes de trabajo → "+ Nueva orden": tipo (instalación, mantenimiento, reparación o visita), cliente, sede, venta de origen, equipo, fecha, técnico y trabajo a realizar (la dirección sale de la sede o del cliente). En la orden: "Cerrar orden" registra la fecha, lo hecho, quién lo recibió y los materiales usados (descuentan stock); si es una instalación, también los equipos instalados con su serie, garantía y frecuencia de mantenimiento. Ya realizada, "Facturar servicio" crea la venta con la mano de obra. Cancelar una orden es solo del administrador.
+- **Sedes:** en la ficha del cliente (Editar), tarjeta "Sedes" → "+ Agregar sede" con nombre, dirección, contacto y teléfono. En la misma ficha, una empresa se marca como "Agente de retención del IGV".
+- **Equipos instalados:** menú Servicios › Equipos instalados → filtros por cliente, estado y garantía; "+ Registrar equipo" para los instalados antes del sistema; "Editar" cambia sede, serie, ubicación, garantía o frecuencia (las visitas pendientes se reprograman); "Retirar" (administrador) lo da de baja y cancela sus visitas.
+- **Contratos:** menú Servicios › Contratos → "+ Nuevo contrato" (administrador): cliente, sede, inicio y fin, cada cuánto se visita y monto por visita; muestra cuántas visitas tendrá antes de guardarlo. Sus visitas aparecen en Postventa.
+- **Postventa:** menú Servicios › Postventa → pestañas Vencidos / Próximos (7 a 90 días) / Realizados / Todos, con filtro por cliente. Cada visita dice si viene de una venta, del plan de un equipo o de un contrato; "Orden" programa la visita con técnico (al cerrar la orden queda realizada). Cada fila muestra cuántos días faltan, el teléfono (con enlace de WhatsApp para coordinar), la dirección y los equipos. "✓ Realizado" registra la fecha de la visita y el trabajo hecho; "Reprogramar" mueve la fecha a pedido del cliente. Además, el sistema envía a diario, a las 8:00 a. m., un correo con los clientes de los próximos 7 días (requiere `CORREO_OFICINA`).
+- **Detracción y retención:** si una venta tiene detracción o retención, la lista de ventas y Cobranza muestran el monto y el neto que paga el cliente. En Cobranza, el botón "Detracción" (o "Retención") abre el cobro con la constancia de depósito (o el comprobante de retención) por lo pendiente: se escribe su N° y se registra; el resto se cobra como siempre.
+- **Cobranza:** menú Cobranza (o "Cobrar" en una venta pendiente) → arriba, cuatro indicadores que llevan a su pestaña (por cobrar, ya vencido, cobrado este mes y por devolver) y la **antigüedad de saldos** (al día, 1–30, 31–60 y más de 60 días de atraso) → lista de ventas a crédito con buscador (cliente, N° de venta o comprobante), filtro "Solo vencidas", barra de lo ya cobrado, saldo y días de atraso → "Recordar" abre WhatsApp con el recordatorio de pago ya escrito (lo revisa y lo envía la persona; el sistema no manda nada solo; se desactiva si el cliente no tiene teléfono) → "Registrar cobro": se abonan uno o varios montos (botón "todo" para el saldo completo) a las ventas del cliente en esa moneda, con fecha, método (transferencia, depósito, efectivo, Yape/Plin, cheque) y N° de operación. Al cubrir el saldo, la venta pasa a PAGADO. La pestaña "Historial de cobros" lista los pagos recibidos (con quién los registró), con filtro por fechas y método y el total del periodo. Si un cobro se registró mal, el administrador pulsa "Anular", escribe el motivo y confirma: el cobro queda tachado como anulado y su monto vuelve al saldo de la venta. Si al registrar un cobro sale "ese N° de operación ya se registró", el pago ya estaba ingresado: revise el historial antes de volver a cobrarlo. La pestaña "Devoluciones" lista el dinero por devolver de ventas anuladas; el administrador pulsa "Registrar devolución" e indica fecha, método y N° de operación.
+- **Compras:** los precios se escriben **tal como figuran en la factura del proveedor, con IGV**; el formulario y la lista muestran el subtotal sin IGV y el IGV (crédito fiscal), y el Excel los trae en columnas. Cada compra deja en el producto su último costo sin IGV (se ve en el formulario del producto); el precio de venta no cambia solo. El N° de factura del proveedor es obligatorio (formato SERIE-NÚMERO, p. ej. F001-123). Si esa factura del mismo proveedor ya se ingresó, el sistema lo avisa y no vuelve a subir el stock.
+- **Tema claro u oscuro:** el botón sol/luna de la barra superior cambia entre claro y oscuro. En Configuración › Preferencias › Tema se elige también "Como el sistema" (sigue al modo de Windows). Se recuerda en esa computadora.
+- **Dar permisos a un asistente (administrador):** menú del avatar o Configuración › "Usuarios y permisos" → en la tarjeta del asistente, encender lo que se le permite (anular ventas, anular cobros, registrar devoluciones, editar el catálogo, eliminar clientes y proveedores, administrar servicios, descuento del administrador) → "Guardar permisos". El asistente lo ve en 5 minutos como máximo o al volver a entrar; para quitarlo, apagar y guardar. En Configuración, cada asistente ve sus "Permisos adicionales".
+- **Historial de cambios (administrador):** menú del avatar o Configuración › "Historial de cambios". Pestaña *Cambios*: quién hizo qué y cuándo (registrar, modificar, anular, eliminar), con filtros por usuario, módulo, resultado y fechas; las filas marcadas en rojo son intentos sin permiso. Al pulsar una fila se ve el detalle (motivo de un rechazo, permisos que quedaron, IP). Pestaña *Inicios de sesión*: entradas, contraseñas erradas y salidas de los últimos 7 días.
+- **Topes de descuento (administrador):** Configuración › Topes de descuento → el máximo % por línea del administrador (también para quien tenga "Descuento ampliado") y el del asistente → "Guardar topes". Rigen desde la próxima proforma o venta; nadie más puede cambiarlos (403) y el cambio queda en el historial con los valores de antes y después.
+- **Compra a crédito:** en Nueva compra, "Pago al proveedor" → "A crédito" y los días. La lista de Compras muestra "Debe …" y la fecha de vencimiento.
+- **Cuentas por pagar:** menú Inventario › Cuentas por pagar → arriba, lo que se debe por moneda (vencido y lo que vence en 7 días) → "Pagar" en la compra: fecha, monto (por defecto el saldo), método y N° de operación → Registrar. Pestaña "Pagos realizados": historial con filtros; "Anular" (administrador) pide el motivo y devuelve el monto al saldo.
+- **Ajustes de inventario:** menú Inventario › Ajustes de inventario. "+ Conteo físico": elegir el material y escribir cuántas unidades hay; el sistema muestra cómo queda el stock y registra la diferencia. "Merma, dañado u otro": entrada o salida, cantidad, motivo y una observación que explique qué pasó. Los ajustes salen en el kardex del producto.
+- **Rentabilidad (administrador):** menú Comercial › Rentabilidad → periodo (este mes, trimestre, año o fechas) → pestañas por venta, cliente, producto, categoría y técnico, con lo vendido sin IGV, el costo y la ganancia. En ámbar, lo que deja menos de 10 %.
+- **Agenda de técnicos:** menú Servicios › Agenda → semana actual con una fila por técnico; flechas para otras semanas. Clic en una visita abre la orden; "+" en un día libre programa una orden para ese técnico. Al programar una orden, escribir la hora y la duración: si el técnico ya tiene otra visita que se cruza, el sistema lo avisa y no la guarda.
+- **Respaldo automático:** una sola vez, `programar_respaldo.bat -Destino "<carpeta fuera de la PC>"` (por ejemplo un USB o la carpeta de OneDrive). Desde entonces Windows respalda todos los días a las 18:30 y deja los últimos 14. Revisar de vez en cuando `C:\SGE-JD\respaldos\respaldo_automatico.log`.
+
+### Preguntas frecuentes
+
+- **"El cliente no recibió el correo":** en Ventas, "Entrega del comprobante" dice si se entregó al servidor de correo, si falló (con el mensaje del servidor) o si quedó por confirmar; "Historial de intentos" muestra cada intento. Verificar el correo del cliente (errores como `.con`), las credenciales SMTP (`MAIL_USERNAME`/`MAIL_PASSWORD`), la salida al puerto 587 y la carpeta de spam del cliente; después, **Reenviar por correo**.
+- **"No me deja vender por stock":** los materiales no admiten stock negativo (409 "Stock insuficiente"); registre una compra o ajuste la cantidad. Los equipos no controlan stock.
+- **"El backend no arranca: Network Adapter could not establish the connection":** Oracle no está encendido; use `iniciar_sgejd.bat` (enciende Docker y Oracle antes que el backend).
+- **"Le di un permiso a Lucy y todavía no le aparece":** la sesión se renueva cada 5 minutos; que espere o cierre sesión y vuelva a entrar.
+- **"Usuarios y permisos dice que no se pudo consultar Keycloak":** Keycloak está apagado o falta `KC_BACKEND_SECRET` en `.env`/`application-local.properties`; ejecutar `python keycloak/configurar_realm.py` con Keycloak encendido.
+- **"¿Cómo guardo una copia de la información?":** `respaldar_sgejd.bat`, al menos una vez por semana, y copiar el archivo de `C:\SGE-JD\respaldos` fuera de la PC.
+- **Soporte técnico:** equipo de desarrollo estudiantil (ver 4. Equipo y responsables).
+
+---
+
+<a id="estado-trazabilidad"></a>
+
+## 4. ESTADO Y TRAZABILIDAD DEL PROYECTO
+
+### Fases de ingeniería de software
+
+| # | Fase | Estado |
+|---|---|---|
+| 1 | Inicio y planificación | ✅ Completo |
+| 2 | Levantamiento de información | ✅ Completo (pendiente confirmar con Lucy el formato exacto de envío a SUNAT) |
+| 3 | Análisis de requisitos | ✅ 16 RF originales + RF-17 a RF-35 (anulación, moneda, descuentos, cobranza, postventa, devoluciones, anulación de cobros, detracción y retención, órdenes de trabajo, equipos instalados, contratos, permisos delegables, historial de cambios, cuentas por pagar, ajustes de inventario, rentabilidad, agenda de técnicos, orden por columna y cliente nuevo desde la venta) |
+| 4 | Modelado de procesos (BPMN AS-IS/TO-BE) | ✅ 2 procesos en BPMN 2.0 (`docs/diagramas/`); los AS-IS son borrador con supuestos S1–S9 por confirmar con el cliente |
+| 5 | Análisis del sistema (casos de uso UML) | ✅ CU-01 a CU-11 y diagrama de casos de uso |
+| 6 | Diseño del sistema (C1–C4, SOLID, BD) | ✅ Completo, con diagrama de clases del dominio (UML) |
+| 7 | Desarrollo | 🔄 Backend y SPA operativos en todos los módulos, con Spring Boot 4.0.7 y Keycloak, más la entrega de comprobantes por correo con seguimiento (08/11/2026). Simulados: WhatsApp y, hasta tener las credenciales de JD, el envío real a SUNAT (probado en beta) y el correo (falta la cuenta de la empresa). Pendiente repartir `reportes` entre módulos |
+| 8 | Pruebas y validación | ✅ 215 pruebas JUnit (171 en la integración continua de GitHub) y 33 del frontend, matriz de seguridad 14/14 y una **prueba de integración real** (migraciones sobre respaldos reales y correo de punta a punta, 08/11/2026: [PRUEBA_INTEGRACION_CORREO.md](PRUEBA_INTEGRACION_CORREO.md)) |
+| 9 | Implementación/despliegue | 🔄 Instalación local en una PC, con arranque, apagado, respaldo y limpieza de un clic (`scripts/`, 25/10/2026). Configuración de producción verificada de punta a punta en contenedores (perfil `prod`, imagen Docker del backend, Oracle y Keycloak propios, SPA en nginx): [PRODUCCION_LOCAL.md](PRODUCCION_LOCAL.md) y [S13](S13_optimizacion_produccion.md) (05/11/2026). Pendiente el servidor de JD y HTTPS |
+| 10 | Documentación técnica | ✅ Este documento, `CONTEXTO.md`, los `README.md` y `lp2-demo.md`, publicados en https://ywagnercs.github.io/proyecto-SAC/ |
+| 11 | Manual de usuario | 🔄 Sección 3 y hoja para el cliente [`LIMITACIONES.md`](LIMITACIONES.md) (actualizada el 08/11/2026); falta un manual con capturas por pantalla |
+| 12 | Trazabilidad (RTM) | ✅ [RTM.md](RTM.md): RF-01 a RF-35 y RNF-01 a RNF-09 con arquitectura, base de datos, API, pantalla y prueba; pruebas que faltan registradas (07/11/2026). Integración y estabilización (S14, LP2): [S14_integracion_estabilizacion.md](S14_integracion_estabilizacion.md); ADR-006, atributos de calidad y trazado de punta a punta (S14, ADS): [S14_ADS_decisiones_trazabilidad.md](S14_ADS_decisiones_trazabilidad.md) |
+| 13 | Mantenimiento y evolución | ✅ Git/GitHub (`YWAGNERCS/proyecto-SAC`, con topics) y publicación automática de la documentación |
+
+### Avances del 07 y 08/11/2026
+
+| Tema | Qué se hizo | Dónde |
+|---|---|---|
+| Facturación SUNAT | Plazo de 3 días, comprobante de reemplazo para rechazos con CDR, historial de envíos, receptor fijo al emitir, ventas "por emitir" sin cuenta de detracciones, envíos detenidos si SUNAT rechaza el usuario SOL | [FACTURACION_SUNAT.md](FACTURACION_SUNAT.md) |
+| Entrega de comprobantes por correo | PDF + XML firmado al cliente solo con validez tributaria; seguimiento en `ENVIOS_CORREO` e `INTENTOS_CORREO`; reintentos, reenvío con confirmación, estado INCIERTO ante una caída, conciliación de eventos perdidos y sin duplicados entre automático y manual; XML validado con un analizador seguro | [FACTURACION_SUNAT.md](FACTURACION_SUNAT.md), sección 5 |
+| Ambiente de SUNAT | Registrado e inmutable en cada comprobante; `SUNAT_AMBIENTE` obligatorio y solo direcciones oficiales (el backend no arranca con un intermediario o una dirección que no corresponde) | (13b) |
+| Auditoría (M1–M4, B5–B10, M9) | Precio editable con motivo y último costo de compra; IGV de compras; ventas con fecha pasada (permiso delegable); anulación con motivo y quién; topes de descuento editables por el administrador; dependencias fijadas; tabla `USUARIOS` retirada; validación de la venta directa | `AUDITORIA_SGE-JD_2026-11-07.md` (fuera del repositorio) |
+| Integración continua | GitHub Actions: backend (pruebas sin Oracle), frontend (auditoría de dependencias, compilación de producción y pruebas) y esta documentación | *Integración continua* en [2. Documentación técnica](#doc-tecnica) |
+| Prueba de integración real | Migraciones sobre un respaldo con datos y sobre el de producción, y correo de punta a punta con el backend real, la beta de SUNAT y un servidor SMTP local | [PRUEBA_INTEGRACION_CORREO.md](PRUEBA_INTEGRACION_CORREO.md) |
+
+### Avances del 05/11/2026
+
+| Tema | Qué se hizo | Dónde |
+|---|---|---|
+| Revisión externa: stock y operaciones simultáneas | Cantidades sumadas por producto y bloqueo de filas: dos ventas al mismo tiempo ya no dejan el stock en negativo, una proforma no se convierte dos veces (índice único `UX_VENTAS_PROFORMA`) y un cobro no se registra dos veces. Probado con peticiones en paralelo: 8 ventas con stock 4 → 4 aceptadas y 4 rechazadas (409), stock final 0 | *Stock y operaciones simultáneas* en [2. Documentación técnica](#doc-tecnica), (42) |
+| Paginación | Ventas, Proformas y Compras se cargan de a 20, 50 o 100; los totales de Ventas se calculan en el servidor sobre todo el filtro. La respuesta de Ventas bajó de 194 KB a 16 KB | (41) |
+| Credenciales | La contraseña de Gmail que quedó en el historial de git se revocó; hasta configurar la cuenta de la empresa no sale ningún correo | (2) |
+| Pruebas automáticas | 72 pruebas JUnit, todas pasan (6 nuevas de stock) | *Pruebas automáticas* en [2. Documentación técnica](#doc-tecnica) |
+| LP2 S13: preparación para producción | Perfiles `dev`/`prod`, logging por perfil, Actuator mínimo y protegido, Cache-Control en el tipo de cambio, Redis descartado con medición, imagen Docker del backend, Oracle y Keycloak propios de producción y el frontend compilado en nginx, verificado de punta a punta | [PRODUCCION_LOCAL.md](PRODUCCION_LOCAL.md), [S13](S13_optimizacion_produccion.md) |
+| Logger | Las 7 clases con `System.out` pasaron a SLF4J; el WhatsApp simulado ya no escribe datos del cliente en el log de producción | (33) |
+
+### Ideas (por decidir)
+
+**Instalar en la PC de JD sin Python: Keycloak que se configura solo.** Hoy Keycloak arranca vacío y lo llena
+`keycloak/configurar_realm.py` (realm, roles, permisos, clientes, cuenta de servicio y usuarios). Ese script
+necesita Python, que la PC de JD probablemente no tenga.
+
+- **Propuesta:** que Keycloak importe al arrancar un JSON con todo el realm (`--import-realm`, como ya hace dev
+  con `realm-bomerp.json`). Las claves y el secreto de la cuenta de servicio irían como variables
+  (`${SGEJD_CLAVE_LISANDRO}`, `${KC_BACKEND_SECRET}`), que Keycloak lee del `.env` al importar: no quedan
+  escritas en el archivo. No hace falta ningún lenguaje, ni Python ni Java.
+- **Junto con eso:** pasar `generar_env_prod.py` a PowerShell (viene con Windows) y compilar el frontend dentro
+  de Docker (Dockerfile de dos etapas, como el del backend). Así la PC de JD solo necesitaría **Docker**:
+  instalarlo, copiar la carpeta y ejecutar un script.
+- **Descartado:** que el backend configure Keycloak al arrancar. Tendría que guardar la contraseña de
+  administrador total de Keycloak, y si se compromete el backend se compromete el control de todos los usuarios.
+- **Sigue en Python** solo lo de desarrollo: `sitio/armar.py` (este sitio) y `docs/diagramas/generar_bpmn.py`.
+
+### Pendientes (al 08/11/2026)
+
+Resumen de lo que falta, según de quién depende. El detalle de cada punto está en [5. Por verificar](#por-verificar) (n.º entre paréntesis).
+
+**Depende del cliente (decisiones o contrataciones de Lisandro)**
+
+| Pendiente | Qué hace falta | Ref. |
+|---|---|---|
+| Facturación electrónica real | El envío directo a SUNAT ya funciona en beta. Falta que Lisandro cree un usuario SOL secundario (solo comprobantes electrónicos), saque el Certificado Digital Tributario y confirme series y la cuenta de detracciones. Al configurarlo: `SUNAT_AMBIENTE=PRODUCCION` con la dirección oficial | (13b) |
+| Acceso desde otra PC o desde el celular | Contratar un servidor o VPS con HTTPS; al instalarlo, eliminar el cliente `sgejd-pruebas` de Keycloak | — |
+| Respaldo automático diario | Elegir la carpeta fuera de la PC (USB, OneDrive o Google Drive de la empresa, red) y ejecutar `programar_respaldo.bat -Destino` | (36) |
+| AS-IS de los procesos | Confirmar los supuestos [S1]–[S9] de los diagramas BPMN | *Modelado de procesos* |
+| Correo de la empresa | Cuenta para enviar facturas, boletas y proformas (`MAIL_USERNAME`/`MAIL_PASSWORD`). La entrega con seguimiento ya está lista; sin la cuenta no sale ningún correo | (13c) |
+| WhatsApp real | Cuenta de WhatsApp Business API (pagada); hoy el envío de proformas por WhatsApp es simulado | (13) |
+| ~~Topes de descuento~~ | ✅ Ya no hace falta confirmarlos: Lisandro los fija en Configuración › Topes de descuento (08/11/2026) | (25b) |
+| Costos visibles para Lucy | Decidir si Lucy debe ver costo y margen en la lista de productos | — |
+| Mantenimiento de ventilación forzada | Confirmar si también lleva mantenimiento preventivo | (14) |
+| Datos de contacto | Teléfono, correo y web de la empresa para facturas, proformas y el pie del correo del comprobante (`EMPRESA_TELEFONO`, `EMPRESA_CORREO`, `EMPRESA_WEB`; vacíos no se muestran) | — |
+
+**Depende del equipo (se puede hacer sin esperar al cliente)**
+
+| Pendiente | Qué hace falta | Ref. |
+|---|---|---|
+| Credenciales en el historial de git | Gmail ya revocada (05/11/2026). Falta regenerar el token de Decolecta si alguna vez se subió uno real | (2) |
+| Costos y márgenes visibles para asistentes | Si deben ser privados, filtrarlos en el backend (hoy `GET /productos` los devuelve a todos; solo el reporte de Rentabilidad está protegido) | (39) |
+| ~~Costo de compra~~ | ✅ Resuelto (08/11/2026): último costo de compra sin IGV, aviso en la venta y precio editable | (40) |
+| Pruebas de seguridad en JUnit | `@WebMvcTest` por rol y permiso (hoy solo `pruebas-seguridad/05_matriz.ps1`) | (28) |
+| DTO en todos los controladores | Categoría, Cliente y Proveedor todavía responden la entidad | (34) |
+| Perfil de pruebas con H2 | Configurarlo o quitar la dependencia del `pom.xml` | (29) |
+| ~~Dependencias del frontend~~ | ✅ Resuelto (07/11/2026): versiones fijadas; la integración continua falla si aparece una vulnerabilidad alta | (34c) |
+| Esquemas Oracle por módulo | Decidir si se separa `JDREFRIGERACION` en esquemas como propone el curso | (22) |
+
+**Antes de entregar el sistema al cliente**
+
+1. Restaurar la base vacía `sgejd_entrega_vacia_20261107.dmp`: hoy tiene datos simulados para la demostración (35). Luego Lisandro carga su catálogo, clientes y proveedores.
+2. Stock inicial con un conteo físico: Inventario › Ajustes de inventario › "+ Conteo físico".
+3. Lisandro y Lucy cambian su contraseña (Configuración › "Cambiar mi contraseña").
+4. Activar el respaldo automático (cuando esté elegida la carpeta).
+5. Configurar el correo de la empresa (`MAIL_USERNAME`/`MAIL_PASSWORD` en `.env.prod`) y, al pasar a SUNAT real, `SUNAT_AMBIENTE=PRODUCCION` con la dirección oficial ([FACTURACION_SUNAT.md](FACTURACION_SUNAT.md)).
+6. Primer día: una venta propia con el correo de Lisandro como cliente, para ver llegar la factura (también en spam).
+
+### Equipo y responsables
+
+Equipo **CherryTree**.
+
+| Integrante | Módulos a cargo | Transaccional (muchos a muchos, con su tabla intermedia) |
+|---|---|---|
+| Yoel Wagner Chambi Sirena | Proveedores, Proformas, Ventas | Proforma ↔ Producto (`ItemProforma`) · Venta ↔ Producto (`DetalleVenta`) |
+| Wilson Ronald Apaza Mamani | Catálogo, Inventario, Compras, Postventa | Compra ↔ Producto (`DetalleCompra`) |
+| Aron Rodrigo Magaño Quispe | Clientes, Facturación, Notificaciones, Cobranza | Cobro ↔ Venta (`DetalleCobro`) |
+
+Cómo funcionan estas relaciones: ver [Relaciones muchos a muchos](#relaciones-muchos-a-muchos).
+
+Seguridad: Keycloak, integrado en S10b (backend como Resource Server y login de la SPA).
+
+### Avance según las sesiones de LP2
+
+| Sesión | Tema | Estado en el proyecto |
+|---|---|---|
+| S1–S5 | Backend REST, CRUD, relaciones, cabecera-detalle, reportes, CORS | ✅ CRUD de producto y relación Categoría–Producto completos (13/10/2026) |
+| S7 | SPA Angular: layout, rutas, servicios HTTP | ✅ |
+| S8 | CRUD de tablas dependientes | ✅ Productos con categoría, categorías, clientes y proveedores (con búsqueda RUC/DNI) y compras |
+| S9 | Formulario transaccional cabecera-detalle | ✅ Venta directa con FormArray, reporte filtrable y anulación; el mismo patrón en Proforma, Compra y "Registrar cobro" |
+| S10 | Seguridad backend con roles | ✅ Ruta **Keycloak** (S10b, 18/10/2026): Resource Server, reglas por rol, `GET /api/v1/auth/perfil`, matriz de 14 casos (`pruebas-seguridad/`) |
+| S11 | Seguridad frontend (guards, interceptores, 401/403) | ✅ 19/10/2026: login Authorization Code + PKCE, `/auth/callback`, `authGuard` (lleva a Keycloak) y `rolGuard('ADMIN')` (lleva a `/sin-permiso`), interceptor que refresca una vez ante 401 y no ante 403, menú por rol. Token en memoria con copia en `sessionStorage` |
+| S12 | Evaluación de la Unidad II | ✅ 25/10/2026: `lp2-demo.md` publicado, presentación del PI (alcance, arquitectura y asignación), guion y demo preparados |
+| S13 | Optimización y preparación para producción | ✅ 05/11/2026: lazy loading y presupuestos, caché del navegador, Redis descartado con medición, logs y Actuator por perfil, producción local en el 4300 ([S13](S13_optimizacion_produccion.md), [producción local](PRODUCCION_LOCAL.md)) |
+| S14 | Integración y estabilización | ✅ 07/11/2026: totales del servidor, checklist de integración, auditoría, prueba end-to-end real y bitácora ([S14](S14_integracion_estabilizacion.md)) |
+| — | Integración con BD2 y ADS | ✅ 10–11/11/2026: `migracion_bd2/` aplicada en desarrollo y producción (backend de producción como `JD_APP`), consultas de BD2 S4, `MODULE`/`ACTION` por operación, ADR-007 (`Cobro.abonar()`), ADR-008 (evento de anulación completo) y Circuit Breaker hacia SUNAT; 228 pruebas en verde |
+| — | Diseño responsivo | ✅ 19/10/2026: celular, tablet y escritorio |
+
+---
+
+<a id="por-verificar"></a>
+
+## 5. Por verificar
+
+Diferencias encontradas al comparar esta documentación, `CONTEXTO.md`, el código y la guía del curso. Ordenadas por importancia.
+
+### Seguridad
+1. ~~**La API está abierta sin login.**~~ ✅ **Resuelto (18/10/2026, S10b):** toda `/api/v1/admin/**` exige un JWT válido de Keycloak; se retiró `app.security.admin-requiere-login`. Solo quedan abiertos el catálogo público y Swagger.
+2. **Credenciales en el historial de git (parcialmente resuelto, 05/11/2026).** La contraseña de aplicación de Gmail (cuenta de Aron) **se eliminó** en Google: aunque aparezca en commits antiguos ya no sirve. **Pendiente:** regenerar el token de Decolecta si alguna vez se subió uno real. Como consecuencia, hoy no sale ningún correo (proformas, facturas, resumen diario) hasta configurar la cuenta de correo de la empresa en `application-local.properties`.
+3. ~~**Roles sin efecto (RF-02).**~~ ✅ **Resuelto (18/10/2026):** ver RF-02. **Por confirmar con Lisandro:** si Lucy debe ver costo y margen de los productos (hoy los ve).
+4. ~~**Usuarios de prueba.**~~ ✅ **Resuelto en parte (18/10/2026):** cuentas `lisandro` y `lucy` en Keycloak (correos `.test`; contraseñas en `.env`, ver 6b). Cada venta guarda quién la registró (`vendedor_id` = `sub`, `vendedor_nombre`). Falta registrar el autor en compras, cobros y anulaciones.
+5. ~~**La SPA guarda el token Basic en `localStorage`**~~ ✅ **Resuelto (18-19/10/2026):** login Authorization Code + PKCE (S256); el access token (5 min) y el refresh token viven en memoria con una copia en `sessionStorage` (sobrevive un F5, se borra al cerrar la pestaña) y se renuevan solos. *Direct access grants* desactivado en `bomerp-frontend`; los scripts de prueba usan su propio cliente, `sgejd-pruebas`. Nota: Spring acepta 60 s de tolerancia de reloj sobre el `exp`.
+6. ~~**`/docs` quedará bloqueado al activar el login.**~~ ✅ **Ya no aplica (25/10/2026):** el backend dejó de servir la documentación en `/docs`; ahora vive en la carpeta `docs/` del repositorio y se publica en https://ywagnercs.github.io/proyecto-SAC/. `SecurityConfig` solo deja abierto `/images/**` (el logo de la factura y del correo).
+6b. ~~**Contraseñas de desarrollo en el repositorio.**~~ ✅ **Resuelto (25/10/2026, auditoría A9):** todas las contraseñas salen de `bomerp-backend/.env` (en `.gitignore`; plantilla `.env.example`): `docker-compose.yml`, `configurar_realm.py` y `pruebas-seguridad/` las leen de ahí, y `realm-bomerp.json` ya no trae hashes. Se cambiaron las de `lisandro`, `lucy` y la consola de Keycloak; el realm tiene protección contra fuerza bruta (5 intentos, espera de 1 a 15 min) y política de contraseñas (10 caracteres, distinta del usuario y del correo), y los puertos de Docker (Oracle 1522, Postgres 35432, Keycloak 38080) solo escuchan en `127.0.0.1`. También se cambiaron las contraseñas de Oracle (SYS, SYSTEM, PDBADMIN y JDREFRIGERACION) y del Postgres de Keycloak; las viejas quedan en el historial de git, pero ya no sirven. Al instalar en el cliente, poner contraseñas propias en su `.env`.
+
+### Funcionalidad
+7. ~~**El reporte `ventas-resumen` cuenta ventas anuladas.**~~ ✅ **Resuelto (13/10/2026):** `ventas-resumen`, `cobranza` y `/ventas/pagos-atrasados` solo consideran ventas REGISTRADAS.
+8. ~~**Al anular una venta no se cancelan sus mantenimientos ni se genera nota de crédito.**~~ ✅ **Resuelto (13/10/2026):** Postventa cancela los mantenimientos PENDIENTES y Facturación emite la nota de crédito (serie FC01/BC01, correlativo por serie) si el comprobante fue aceptado.
+9. ~~**Producto sin categoría.**~~ ✅ **Resuelto (13/10/2026):** `Producto` tiene `@ManyToOne Categoria`; la API exige la categoría al crear/editar (404 si no existe) y no deja borrar una categoría con productos (409). Verificado el 25/10/2026: ningún producto queda sin categoría.
+10. ~~**Pantalla de productos en la SPA.**~~ ✅ **Resuelto (13/10/2026):** productos con filtro por categoría, y clientes y proveedores con formulario y búsqueda RUC/DNI en la SPA.
+11. ~~**Autocompletado RUC/DNI simulado.**~~ ✅ **Resuelto (13/10/2026):** proveedor principal apis.net.pe v1 (sin token), respaldo Decolecta con `DECOLECTA_TOKEN` (RUC por SUNAT, DNI por RENIEC) y modo simulado solo con `CONSULTA_DOCUMENTOS_SIMULADO=true`. ⚠️ La v1 limita las consultas seguidas (429): se responde 503 "intente en unos segundos" y se recomienda registrar un token gratuito de Decolecta como respaldo. La API oficial de RENIEC (PIDE) requiere convenio institucional y no está disponible para el proyecto.
+12. ~~**Correlativo de comprobantes aleatorio.**~~ ✅ **Resuelto (15/10/2026):** cada serie (F001, B001, FC01, BC01) numera 00000001, 00000002… sin saltos ni repetidos, con un contador por serie (`SERIES_COMPROBANTE`) bloqueado durante la venta y la restricción única (serie, número). Probado con 5 ventas simultáneas: números consecutivos, 0 repetidos. Las bases existentes deben correr `migracion_correlativos.sql` una vez (renumera los comprobantes ya emitidos).
+13. **WhatsApp simulado:** `NotificadorSimulado` solo escribe en el log.
+13b. **Facturación electrónica (06/11/2026): envío directo a SUNAT probado en beta.** Con `app.facturacion.modo=sunat`, SGE-JD arma el XML UBL 2.1 (xbuilder de OpenUBL), lo firma con el certificado de JD y lo envía a SUNAT (sendBill); en beta fueron aceptadas facturas, boletas y notas de crédito, y un rechazo real (3034, falta la cuenta de detracciones) quedó registrado con su motivo. Ver *Facturación electrónica: envío directo a SUNAT* en la documentación técnica. **Pendiente para producción:** usuario SOL secundario, Certificado Digital Tributario, series y cuenta de detracciones (decisiones de Lisandro y su contador). **Ambiente (08/11/2026):** se declara en `SUNAT_AMBIENTE` (PRODUCCION o BETA, obligatorio) y solo se aceptan las direcciones oficiales de SUNAT; queda registrado e inmutable en cada comprobante aceptado y solo PRODUCCION se envía por correo al cliente.
+13c. ~~**Correo sin configurar.**~~ ✅ **Listo para usar (08/11/2026):** la entrega de facturas y boletas al cliente (PDF + XML firmado) tiene seguimiento, reintentos y reenvío en Ventas. Solo falta la cuenta de correo de la empresa (`MAIL_USERNAME`/`MAIL_PASSWORD`); la Gmail de prueba de Aron se revocó el 05/11/2026.
+14. **Mantenimientos solo para CLIMATIZACIÓN y REFRIGERACIÓN.** Confirmar con el cliente si VENTILACIÓN FORZADA también los requiere.
+15. ~~**Alerta de stock mínimo sobre todos los productos.**~~ ✅ **Resuelto (15/10/2026):** las alertas (pantalla y correo diario) consideran solo materiales (`MATERIAL_SERVICIO`); los equipos no controlan stock y ya no generan alertas falsas.
+16. ~~**Proformas vencidas sin programar.**~~ ✅ **Resuelto (15/10/2026):** `ProformaScheduledService` vence las proformas PENDIENTES todos los días a las 00:05 y también al iniciar el backend (por si estuvo apagado). Ejecución manual: `POST /proformas/marcar-vencidas`.
+17. ~~**Moneda mixta.**~~ ✅ **Resuelto y ampliado (15/10/2026):** cada venta y proforma elige su moneda (soles o dólares) y los productos en la otra moneda se **convierten con el tipo de cambio**, que queda guardado en la venta/proforma. Ver RF-18.
+18. ~~**`ProductoController` usa el repositorio directamente.**~~ ✅ **Resuelto (13/10/2026):** ahora pasa por `ProductoService` y responde con `ProductoResponseDTO`.
+
+### Arquitectura y alineamiento con el curso
+19. **Versión de Spring Boot.** ✅ Migrado de 3.3.4 a **4.0.7** (22/10/2026), la versión que fija la guía del curso (ADR-003). Ver *Migración a Spring Boot 4.0.7* en la sección 2.
+20. ~~**Spring Modulith no está implementado.**~~ ✅ **Resuelto (31/10/2026):** Spring Modulith 2.0.7 y `ModularityTests` verifican los límites entre módulos y la ausencia de ciclos en cada `mvn test` (ver *Límites entre módulos* en la sección 2).
+21. ~~**Límites entre módulos incumplidos.**~~ ✅ **Resuelto (31/10/2026):** Facturación, Reportes y Rentabilidad usan fachadas de servicio en vez de repositorios ajenos; Ventas avisa a Facturación y Postventa con eventos. Queda como opción repartir los reportes por módulo.
+22. **Esquemas Oracle por módulo.** El curso propone esquemas `BOM_CATALOGO`, `BOM_VENTAS`, etc.; aquí todo está en un solo esquema (`JDREFRIGERACION`), y `CONTEXTO.md` mencionaba un prefijo `JD_<MODULO>` que no se usa.
+23. **Paquete raíz.** Documentaciones anteriores decían `com.jdrefrigeracion` o `pe.edu.upeu.sgejd`; el real es `com.bomerp`.
+24. ~~**Seguridad con Keycloak sin responsable.**~~ ✅ **Hecho (18/10/2026):** Keycloak 26.8 + Postgres en `docker-compose.yml`, backend como Resource Server y SPA adaptada. **Confirmar con el docente** que la ruta S10b es válida para la evaluación de S10 (la guía S10b dice que no se evalúa). S11 hecho (19/10/2026): login con redirección y PKCE, y *Direct access grants* desactivado (ver punto 5).
+25. ~~**Cobranza por separar.**~~ ✅ **Resuelto (15/10/2026):** paquete `cobranza` con `Cobro`–`DetalleCobro`, abonos parciales y saldos; usa Ventas solo por su fachada (`listarPendientesDeCobro`, `obtenerPorIdPublico`, `marcarComoPagada`). (a) ✅ **Resuelto (25/10/2026, A8):** anular una venta que el cliente ya pagó (al contado o con abonos) avisa el monto antes de confirmar y deja una **devolución PENDIENTE** en Cobranza › Devoluciones; el ADMIN registra cuándo y cómo se devolvió. Ventas publica `VentaAnuladaEvent` y Cobranza lo escucha en la misma transacción, así Ventas no depende de Cobranza. (b) ✅ **Resuelto (25/10/2026, A7):** se retiró `POST /ventas/{id}/marcar-pagada`, que también podía llamar ASISTENTE y marcaba PAGADA sin cobro; una venta solo pasa a PAGADO por sus abonos. Pendiente: (c) `/reportes/cobranza` sigue en `reportes`.
+25b. ~~**Topes de descuento por confirmar.**~~ ✅ **Resuelto (08/11/2026):** el administrador los fija en Configuración › Topes de descuento (tabla `TOPES_DESCUENTO`; no se delega y queda en el historial). Mientras no los cambie valen 30 % (administrador y "Descuento ampliado") y 10 % (asistente).
+26. **Migración de base de datos para Proformas.** Cada integrante debe ejecutar `migracion_proforma.sql` en su Oracle local antes de arrancar el backend nuevo; si no, Hibernate crea tablas `PROFORMAS` vacías.
+27. **Herramienta de modernización:** `C:\SGE-JD\.github\modernize\` (fuera de los repositorios) registra un intento de migrar a Java 25 / Boot 3.5.16 que no se aplicó. Se puede borrar.
+
+- ~~**Datos de JD en el PDF del comprobante.**~~ ✅ **Resuelto (15/10/2026):** la factura/boleta y la proforma imprimen la razón social, el RUC (20521632268) y la dirección reales de JD, configurados en `application.properties` (`app.empresa.*`, clase `EmpresaProperties`). Se quitó el teléfono de ejemplo. **Pendiente:** teléfono y correo de la empresa, en espera de que Lisandro los confirme.
+- **Compras y stock de equipos (corregido 13/10/2026).** Las compras subían el stock de todos los productos, incluidos los equipos, mientras las ventas solo descontaban materiales. Ahora las compras también suben solo el stock de materiales.
+
+### Pruebas y configuración
+28. ~~**Pruebas automatizadas casi inexistentes.**~~ ✅ **Resuelto (31/10/2026):** 61 pruebas unitarias de reglas de negocio (cobranza, cuentas por pagar, ajustes, detracción, agenda, permisos, historial, rentabilidad, compras) más `ProductoCrudTest`; ver "Pruebas automáticas" en la documentación técnica. **Pendiente:** pruebas de controladores (`@WebMvcTest`) para la seguridad por rol, hoy cubierta por `05_matriz.ps1`.
+29. **H2 incluido pero sin perfil.** La dependencia está en el `pom.xml`, pero no hay configuración H2 activa (se eliminó `application-test.properties`, que solo cambiaba el puerto).
+30. ~~**Paquete de arreglos 2 sin aplicar.**~~ Ya no existe la carpeta `Claude/arreglos2`. De lo que traía, el correlativo secuencial se hizo aparte (punto 12); siguen pendientes las pruebas de ventas (punto 28) y los límites entre módulos (punto 21).
+31. **Contenedor Docker:** la documentación anterior lo llamaba `SGE-DJ`; el real es **`SGE-JD`**. El volumen `sge-jd-oracle-data` está marcado como `external` en `docker-compose.yml`, así que debe existir antes de `docker compose up`.
+32. **Requisitos "16 RF consolidados en 8":** la documentación anterior lo decía, pero no existe esa versión consolidada. Confirmar si hay otro documento con los 8 RF.
+33. ~~**`System.out` en vez de logger**~~ ✅ **Resuelto (05/11/2026, S13):** las 7 clases que lo usaban (las 5 anotadas más `FacturacionService` y `ProformaService`) usan SLF4J, así que el nivel de cada perfil (`logback-spring.xml`) también las controla. El WhatsApp simulado, que escribía el teléfono y el mensaje del cliente, quedó en DEBUG: no sale en el log de producción.
+34. **Algunos controllers todavía responden entidades:** Categoría, Cliente y Proveedor (el resto ya usa DTO).
+34b. ~~**La SPA todavía dice "BomERP".**~~ ✅ **Resuelto (25/10/2026):** pestaña, títulos de las 25 rutas, menú (ícono "JD") e Inicio dicen SGE-JD, y el Inicio tiene accesos a Ventas, Proformas, Cobranza y Postventa. (`bomerp` sigue siendo el nombre técnico del realm y del cliente de Keycloak.) Pendiente: indicadores en el Inicio (ventas del mes, por cobrar, stock en alerta).
+34c. ~~**Dependencias.**~~ ✅ **Resuelto (07/11/2026, auditoría B5):** Angular y zod en versiones exactas sin avisos altos; la integración continua corre `npm audit --audit-level=high` en cada cambio del frontend.
+
+### Operación
+35. **Base con datos simulados para la demostración (31/10/2026).** Tiene un año ficticio (11/2025 → 10/2026) cargado por la API como lo harían Lucy y Lisandro: 34 clientes, 8 proveedores, 39 productos, 219 proformas, 224 ventas (3 anuladas con su devolución), cobros con detracción y retención, 48 compras con pagos, 58 órdenes de trabajo, mantenimientos, 5 contratos y ajustes de inventario. Las fechas se corrieron por SQL y las facturas se renumeraron por fecha. **Antes de entregar:** `restaurar_sgejd.bat` con `respaldos/sgejd_entrega_vacia_20261107.dmp` (base vacía, series en 0). Es el respaldo vacío del 30/10 con `migracion_proforma_unica.sql`, `migracion_envio_sunat.sql` y `migracion_compra_factura_unica.sql` aplicadas (07/11/2026, auditoría A10 y revisión externa) y, desde la noche del 07/11/2026, también `migracion_comprobante_reemplazo.sql` (comprobante de reemplazo e historial de envíos; la versión anterior quedó como `sgejd_entrega_vacia_20261107_sin_reemplazo.dmp`), `migracion_quitar_usuarios.sql` (26 tablas, sin `USUARIOS`; la anterior quedó como `sgejd_entrega_vacia_20261107_con_usuarios.dmp`) y `migracion_venta_anulacion.sql` (quién anuló y por qué; la anterior quedó como `sgejd_entrega_vacia_20261107_sin_anulacion.dmp`). Desde el 08/11/2026 incluye también `migracion_costos_precios.sql` (IGV de compras, último costo, precio editado y `TOPES_DESCUENTO`: 27 tablas; la anterior quedó como `sgejd_entrega_vacia_20261107_sin_costos_precios.dmp`) y `migracion_envio_correo.sql` (`ENVIOS_CORREO` e `INTENTOS_CORREO`: 29 tablas; la anterior quedó como `sgejd_entrega_vacia_20261107_sin_envio_correo.dmp`) y `migracion_ambiente_emision.sql` (ambiente de emisión y su disparador; la anterior quedó como `sgejd_entrega_vacia_20261107_sin_ambiente.dmp`). Restaurado en un esquema aparte: 0 diferencias con la base de desarrollo: el del 30/10 restauraba el esquema de ese día, sin las columnas de la respuesta de SUNAT ni el índice de proforma única. Se comprobó restaurándolo en un esquema aparte: 0 diferencias de columnas, índices y restricciones con la base actual. **Si después se cambia el esquema, hay que volver a generarlo.** Los datos de prueba anteriores siguen en `sgejd_antes_de_entrega_20261030_2224.dmp`.
+36. **Respaldo automático sin activar (⏳ pendiente).** Los scripts están listos desde el 31/10/2026 (`programar_respaldo.bat`, RNF-08), pero la tarea diaria **no está programada**: falta que Lisandro elija la carpeta fuera de la PC para la copia (USB, OneDrive o Google Drive de la empresa, o una carpeta de red). Mientras tanto, respaldo manual con `respaldar_sgejd.bat` al menos una vez por semana. Al decidir: `programar_respaldo.bat -Destino "<carpeta>"`. Corregido el 11/11/2026 (revisión externa): antes respaldaba solo la base de desarrollo, su rotación podía borrar los respaldos manuales y, al ejecutarse solo, fallaba siempre (el primer aviso de docker en stderr lo cortaba); ahora toma la de producción si está encendida y rota solo los diarios de cada entorno.
+37. **Un error 500 sin explicar (25/10/2026).** Crear una venta falló una vez, sin guardar nada, en un backend que se había encendido justo después de cambiar las contraseñas de la base; no se pudo reproducir. Si vuelve a pasar, revisar la ventana "SGE-JD · Backend".
+38. ~~**Tabla `USUARIOS` sin uso.**~~ ✅ **Resuelto (07/11/2026, auditoría B7):** estaba vacía y sin uso desde Keycloak (S10b). `migracion_quitar_usuarios.sql` la borra solo si está vacía y se puede ejecutar varias veces; aplicada en desarrollo. Producción nunca la tuvo (su esquema sale de `esquema_jdrefrigeracion.sql`) y el respaldo de entrega se regeneró sin ella.
+39. **Costos y márgenes visibles para asistentes (revisión externa, 05/11/2026).** El reporte de Rentabilidad es solo de ADMIN o `PERM_VER_RENTABILIDAD`, pero `GET /api/v1/admin/productos` devuelve `costoBase` y `margenPorcentaje` a cualquier usuario. Si Lisandro decide que sean privados, hay que quitarlos de la respuesta en el backend según el permiso (ocultarlos solo en la pantalla no basta).
+40. ~~**Costo de compra sin actualizar (revisión externa, 05/11/2026).**~~ ✅ **Resuelto (08/11/2026, auditoría M1 y M2):** decidido con el cliente: el precio de venta no cambia solo. La compra guarda el último costo sin IGV en el producto; Ventas y Proformas avisan si supera el costo del catálogo y permiten **editar el precio de la línea** (solo subir, con motivo, ADMIN o `PERM_EDITAR_PRECIO`), con las dos cifras guardadas y el registro en el historial; la rentabilidad usa ese costo. Las compras separan subtotal e IGV.
+41. ~~**Listados sin paginación (revisión externa, 05/11/2026).**~~ ✅ **Resuelto (05/11/2026):** las pantallas de Ventas, Proformas y Compras piden de a 20 (o 50 / 100) con `GET /ventas/pagina`, `/proformas/pagina` y `/compras/pagina` (`pagina` desde 0, `tamano` máximo 100; respuesta `Pagina`: contenido, pagina, tamano, total, totalPaginas). En Proformas y Compras pagina la base de datos; en Ventas el servidor además calcula los totales por moneda y las anuladas de **todo** el filtro, así los indicadores no cambian al paginar. La respuesta de Ventas bajó de 194 KB a 16 KB. Los listados completos (`GET /ventas`, `/proformas`, `/compras`) se mantienen para el tablero, los avisos y los formularios que los usan.
+42. ~~**Stock y conversiones sin bloqueo (revisión externa, 05/11/2026).**~~ ✅ **Resuelto:** cantidades sumadas por producto, bloqueo de filas en productos, proformas, ventas (cobros) y compras (pagos), e índice único en `ventas.proforma_id`. Ver *Stock y operaciones simultáneas*.

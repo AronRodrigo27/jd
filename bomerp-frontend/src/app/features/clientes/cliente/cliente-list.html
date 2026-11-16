@@ -1,0 +1,63 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Clientes</h1>
+    <p class="page-sub">Directorio de clientes registrados</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <input
+      id="buscar-cliente"
+      type="search"
+      class="search-input"
+      placeholder="Buscar por nombre, RUC, DNI o correo..."
+      (input)="onBuscar($event)"
+    />
+    <a routerLink="/clientes/nuevo" class="btn btn-primary" style="white-space: nowrap;">+ Nuevo Cliente</a>
+  </div>
+</div>
+
+@if (mensaje()) {
+  <div class="alert alert-info" role="status">{{ mensaje() }}</div>
+}
+
+@if (cargando()) {
+  <div class="loading-state">Cargando clientes…</div>
+} @else if (error()) {
+  <div class="error-state">{{ error() }}</div>
+} @else if (clientesFiltrados.length === 0) {
+  <div class="empty-state">No se encontraron clientes.</div>
+} @else {
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th><app-orden campo="id" [orden]="orden()" (cambiar)="orden.set($event)">#</app-orden></th>
+          <th><app-orden campo="nombre" [orden]="orden()" (cambiar)="orden.set($event)">Nombre / Razón Social</app-orden></th>
+          <th><app-orden campo="tipo" [orden]="orden()" (cambiar)="orden.set($event)">Tipo</app-orden></th>
+          <th><app-orden campo="documento" [orden]="orden()" (cambiar)="orden.set($event)">RUC / DNI</app-orden></th>
+          <th>Teléfono</th>
+          <th>Correo</th>
+          <th style="text-align: right;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (cliente of clientesFiltrados; track cliente.id) {
+          <tr>
+            <td class="id-cell">{{ cliente.id }}</td>
+            <td><strong>{{ cliente.nombreORazonSocial }}</strong></td>
+            <td>{{ cliente.tipo === 'EMPRESA' ? 'Empresa' : 'Persona natural' }}</td>
+            <td><span class="badge">{{ documento(cliente) }}</span></td>
+            <td>{{ cliente.telefono ?? '—' }}</td>
+            <td>{{ cliente.correo ?? '—' }}</td>
+            <td style="text-align: right; white-space: nowrap;">
+              <a class="btn btn-secondary btn-sm" [routerLink]="['/clientes', cliente.id, 'historial']">Historial</a>
+              <a class="btn btn-outline-secondary btn-sm" style="margin-left: 6px;" [routerLink]="['/clientes', cliente.id, 'editar']">Editar</a>
+              @if (puedeEliminar()) {
+                <button class="btn btn-danger btn-sm" style="margin-left: 6px;" (click)="eliminar(cliente)">Eliminar</button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

@@ -1,0 +1,88 @@
+import { Component, OnInit, signal, inject, computed } from '@angular/core';
+import { AuthService } from '../../../core/auth/auth.service';
+import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
+import { ClienteService } from './cliente-service';
+import { Cliente } from './cliente.model';
+import { CamposOrden, Orden, OrdenComponent, ordenarLista } from '../../../core/layout/orden';
+
+/** Columnas ordenables con un clic en el encabezado. */
+const CAMPOS_ORDEN: CamposOrden<Cliente> = {
+  id: (x) => x.id,
+  nombre: (x) => x.nombreORazonSocial,
+  tipo: (x) => (x.tipo === 'EMPRESA' ? 'Empresa' : 'Persona'),
+  documento: (x) => x.ruc ?? x.dni,
+};
+
+@Component({
+  selector: 'app-cliente-list',
+  standalone: true,
+  imports: [CommonModule, RouterLink, OrdenComponent],
+  templateUrl: './cliente-list.html',
+  styleUrl: './cliente-list.css',
+})
+export class ClienteListComponent implements OnInit {
+  /** Solo ADMIN modifica/elimina/anula (el backend lo vuelve a exigir con 403). */
+  private readonly auth = inject(AuthService);
+  /** ADMIN o asistente con el permiso ELIMINAR delegado (el backend exige lo mismo). */
+  readonly puedeEliminar = computed(() => this.auth.puede('ELIMINAR'));
+
+  clientes = signal<Cliente[]>([]);
+  cargando = signal(true);
+  error = signal<string | null>(null);
+  mensaje = signal<string | null>(null);
+  busqueda = signal('');
+  /** Columna por la que se ordena; null = como llegan del servidor. */
+  orden = signal<Orden | null>(null);
+
+  constructor(private clienteService: ClienteService) {}
+
+  ngOnInit(): void {
+    this.cargar();
+  }
+
+  cargar(): void {
+    this.cargando.set(true);
+    this.clienteService.listarTodos().subscribe({
+      next: (data) => { this.clientes.set(data); this.cargando.set(false); },
+      error: () => { this.error.set('No se pudo cargar la lista de clientes.'); this.cargando.set(false); },
+    });
+  }
+
+  /** RUC si es empresa, DNI si es persona natural. */
+  documento(c: Cliente): string {
+    return c.ruc ?? c.dni ?? '—';
+  }
+
+  get clientesFiltrados(): Cliente[] {
+    const q = this.busqueda().toLowerCase();
+    const todos = ordenarLista(this.clientes(), this.orden(), CAMPOS_ORDEN);
+    if (!q) return todos;
+    return todos.filter(c =>
+      c.nombreORazonSocial.toLowerCase().includes(q) ||
+      (c.ruc ?? '').includes(q) ||
+      (c.dni ?? '').includes(q) ||
+      (c.correo ?? '').toLowerCase().includes(q)
+    );
+  }
+
+  onBuscar(event: Event): void {
+    this.busqueda.set((event.target as HTMLInputElement).value);
+  }
+
+  eliminar(c: Cliente): void {
+    if (!confirm(`¿Eliminar al cliente "${c.nombreORazonSocial}"?`)) return;
+    this.error.set(null);
+    this.mensaje.set(null);
+    this.clienteService.eliminar(c.id!).subscribe({
+      next: () => {
+        this.mensaje.set(`Cliente "${c.nombreORazonSocial}" eliminado.`);
+        this.cargar();
+      },
+      error: (err: HttpErrorResponse) =>
+        // 409: tiene proformas o ventas registradas
+        this.error.set(err.status === 409 ? err.error?.message : 'No se pudo eliminar el cliente.'),
+    });
+  }
+}

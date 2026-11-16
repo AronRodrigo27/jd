@@ -1,0 +1,124 @@
+/*
+ * Ruta: bomerp-backend/src/main/java/com/bomerp/compras/compra/controller/CompraController.java
+ * CAMBIO SOLICITADO: exponer el registro de recepciones parciales de una compra existente.
+ */
+package com.bomerp.compras.compra.controller;
+
+import com.bomerp.config.paginacion.Pagina;
+import com.bomerp.compras.pago.service.CuentasPorPagarService;
+import java.math.BigDecimal;
+import java.util.Map;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import com.bomerp.compras.reporte.service.CompraReporteService;
+import com.bomerp.config.exportacion.ExcelBuilder;
+import org.springframework.format.annotation.DateTimeFormat;
+import java.time.LocalDate;
+import com.bomerp.compras.compra.service.CompraService;
+import com.bomerp.compras.compra.dto.CompraRequestDTO;
+import com.bomerp.compras.compra.dto.CompraResponseDTO;
+import com.bomerp.compras.compra.dto.RecepcionCompraRequestDTO;
+import com.bomerp.compras.compra.entity.Compra;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/v1/admin/compras")
+public class CompraController {
+
+    private final CompraService compraService;
+    private final CompraReporteService compraReporteService;
+    private final CuentasPorPagarService cuentasPorPagarService;
+
+    public CompraController(CompraService compraService, CompraReporteService compraReporteService,
+                            CuentasPorPagarService cuentasPorPagarService) {
+        this.compraService = compraService;
+        this.compraReporteService = compraReporteService;
+        this.cuentasPorPagarService = cuentasPorPagarService;
+    }
+
+    /** Compras con filtros opcionales: rango de fechas (yyyy-MM-dd) y proveedor. */
+    @GetMapping
+    public List<CompraResponseDTO> listar(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long proveedorId) {
+        List<Compra> compras = compraService.buscar(desde, hasta, proveedorId);
+        Map<Long, BigDecimal> pagado = cuentasPorPagarService.pagadoPorCompra(compras);
+        return compras.stream()
+                .map(c -> CompraResponseDTO.desdeEntidad(c, c.getTipoPago() == Compra.TipoPago.CREDITO
+                        ? pagado.getOrDefault(c.getId(), BigDecimal.ZERO) : c.getTotal()))
+                .toList();
+    }
+
+    /** Compras por páginas (pantalla de Compras): pagina desde 0, tamano 20 por defecto (máximo 100). */
+    @GetMapping("/pagina")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public Pagina<CompraResponseDTO> pagina(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long proveedorId,
+            @RequestParam(required = false) Integer pagina,
+            @RequestParam(required = false) Integer tamano,
+            @RequestParam(required = false) String orden) {
+        var page = compraService.buscarPagina(desde, hasta, proveedorId, Pagina.pedido(pagina, tamano), orden);
+        Map<Long, BigDecimal> pagado = cuentasPorPagarService.pagadoPorCompra(page.getContent());
+        return Pagina.de(page, c -> CompraResponseDTO.desdeEntidad(c, c.getTipoPago() == Compra.TipoPago.CREDITO
+                ? pagado.getOrDefault(c.getId(), BigDecimal.ZERO) : c.getTotal()));
+    }
+
+    /** Mismo listado en Excel (.xlsx): hoja "Compras" y hoja "Detalle". */
+    @GetMapping("/exportar")
+    public ResponseEntity<byte[]> exportarExcel(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) Long proveedorId) {
+        byte[] excel = compraReporteService.exportarExcel(desde, hasta, proveedorId);
+        return ExcelBuilder.descargar(excel, "compras_" + LocalDate.now() + ".xlsx");
+    }
+
+    /** Historial de un proveedor: sus compras y montos por moneda. */
+    @GetMapping("/historial-proveedor/{proveedorId}")
+    public CompraReporteService.HistorialProveedor historialProveedor(@PathVariable Long proveedorId) {
+        return compraReporteService.historialProveedor(proveedorId);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<CompraResponseDTO> buscarPorId(@PathVariable Long id) {
+        return compraService.buscarPorId(id)
+                .map(c -> CompraResponseDTO.desdeEntidad(c, c.getTipoPago() == Compra.TipoPago.CREDITO
+                        ? cuentasPorPagarService.pagadoPorCompra(List.of(c)).getOrDefault(c.getId(), BigDecimal.ZERO)
+                        : c.getTotal()))
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping
+    public ResponseEntity<CompraResponseDTO> registrarCompra(@Valid @RequestBody CompraRequestDTO requestDTO,
+                                                             @AuthenticationPrincipal Jwt jwt) {
+        Compra compraGuardada = compraService.registrarCompra(requestDTO,
+                jwt != null ? jwt.getClaimAsString("preferred_username") : null);
+        // Recién creada: a crédito todavía no tiene pagos
+        return ResponseEntity.status(HttpStatus.CREATED).body(CompraResponseDTO.desdeEntidad(compraGuardada,
+                compraGuardada.getTipoPago() == Compra.TipoPago.CREDITO ? BigDecimal.ZERO : compraGuardada.getTotal()));
+    }
+
+    /** Recibe unidades en la factura existente; no crea otra compra ni cambia el importe por pagar. */
+    @PostMapping("/{id}/recepciones")
+    public ResponseEntity<CompraResponseDTO> registrarRecepcion(@PathVariable Long id,
+            @Valid @RequestBody RecepcionCompraRequestDTO requestDTO) {
+        Compra compra = compraService.registrarRecepcion(id, requestDTO);
+        BigDecimal pagado = compra.getTipoPago() == Compra.TipoPago.CREDITO
+                ? cuentasPorPagarService.pagadoPorCompra(List.of(compra)).getOrDefault(id, BigDecimal.ZERO)
+                : compra.getTotal();
+        return ResponseEntity.ok(CompraResponseDTO.desdeEntidad(compra, pagado));
+    }
+}
+
+/* Flujo: el endpoint valida el formato; CompraService valida lo pendiente, registra la cantidad recibida
+   y mueve stock. El DTO devuelto conserva total/pago y reporta el estado de entrega actualizado. */

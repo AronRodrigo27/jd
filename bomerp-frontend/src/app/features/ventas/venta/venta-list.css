@@ -1,0 +1,179 @@
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.filtros > div {
+  min-width: 160px;
+}
+
+.filtros-acciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agregados {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.kpi {
+  margin-bottom: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kpi span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.kpi strong {
+  font-size: 1.3rem;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.vacio {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.acciones {
+  white-space: nowrap;
+}
+
+.acciones .btn + .btn {
+  margin-left: 6px;
+}
+
+.venta-row td {
+  border-bottom: none;
+}
+
+.detalle-row td {
+  padding-top: 0;
+}
+
+.detalle {
+  width: 100%;
+  font-size: 0.84rem;
+  background: var(--bg-color);
+  border-radius: var(--radius-sm);
+  border-collapse: collapse;
+}
+
+.detalle th,
+.detalle td {
+  padding: 4px 10px;
+  border: none;
+}
+
+.detalle th {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+}
+
+.detalle .num {
+  text-align: right;
+}
+
+.detalle .pie td {
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+}
+
+.anulada {
+  opacity: 0.55;
+}
+
+.anulada td strong {
+  text-decoration: line-through;
+}
+
+/* ── Celular: estado a todo el ancho, fechas lado a lado, botones parejos ── */
+@media (max-width: 640px) {
+  .filtros {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .filtros > div {
+    min-width: 0;
+    flex: 1 1 calc(50% - 5px);
+  }
+
+  .filtros > div:first-child,
+  .filtros-acciones {
+    flex-basis: 100%;
+  }
+
+  .filtros .form-select,
+  .filtros .form-control {
+    width: 100%;
+  }
+
+  .filtros-acciones > .btn {
+    flex: 1 1 auto;
+  }
+
+  .agregados {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .kpi {
+    padding: 10px 12px;
+  }
+
+  .kpi strong {
+    font-size: 1.05rem;
+  }
+}
+
+/* Comprobante electrónico: estado ante SUNAT bajo el detalle de la venta */
+.sunat-corta { margin-top: 4px; }
+.sunat-corta .badge { font-size: 0.7rem; }
+.badge-neutro { background: var(--suave); color: var(--text-muted); }
+.sunat { margin-top: 8px; display: grid; gap: 6px; }
+.sunat-linea { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--suave); font-size: 0.85rem; }
+.sunat-problema { outline: 1px solid var(--aviso-borde, #e0b84d); }
+.sunat-doc { font-weight: 600; }
+.sunat-mensaje { flex: 1 1 260px; color: var(--text-muted); }
+.sunat-acciones { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+/* Comprobante rechazado y sustituido: queda solo como historial */
+.sunat-reemplazado { opacity: 0.75; }
+.sunat-reemplazado .sunat-doc { text-decoration: line-through; }
+/* Historial de envíos a SUNAT de un documento */
+.sunat-envios { display: grid; gap: 4px; margin: -2px 0 2px 16px; padding-left: 10px; border-left: 2px solid var(--suave); font-size: 0.8rem; }
+.sunat-envio { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Plazo de 3 días para que SUNAT reciba el comprobante */
+.sunat-plazo { font-weight: 600; color: var(--warning); }
+/* Quién anuló la venta y por qué (auditoría M4) */
+.motivo-anulacion { margin-top: 4px; font-size: 0.8rem; color: var(--texto-peligro); }
+
+/* Entrega del comprobante por correo: el estado SUNAT y el del correo se ven por separado */
+.entrega { margin: 2px 0 4px 16px; padding: 10px 12px; border: 1px solid var(--borde-tarjeta); border-radius: var(--radius-sm); background: var(--surface-muted); display: grid; gap: 6px; font-size: 0.82rem; }
+/* Correo entregado al servidor SMTP: celeste, distinto del verde de "Aceptado por SUNAT" */
+.badge-entregado { background: var(--primary-light); color: var(--secundario); }
+.entrega-titulo { font-weight: 600; color: var(--text-main); }
+.entrega-fila { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.entrega-dato { display: inline-flex; align-items: center; gap: 6px; }
+.entrega-detalle { color: var(--text-muted); }
+.entrega-error { color: var(--texto-peligro); }
+.entrega-acciones { display: flex; flex-wrap: wrap; gap: 6px; }
+.entrega-adjuntos { flex-basis: 100%; word-break: break-all; }
+@media (max-width: 600px) { .entrega { margin-left: 0; } }

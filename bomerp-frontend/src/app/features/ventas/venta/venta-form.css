@@ -1,0 +1,145 @@
+.detalle-table td {
+  vertical-align: top;
+}
+
+.celda-subtotal {
+  font-weight: 600;
+}
+
+.producto-cell {
+  position: relative;
+}
+
+.sugerencias {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.sugerencias li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.sugerencias li:hover {
+  background: var(--primary-light);
+}
+
+.sug-precio {
+  white-space: nowrap;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.sug-precio small {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.totales {
+  margin-left: auto;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.totales div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.totales .total {
+  border-top: 1px solid var(--border-color);
+  padding-top: 6px;
+  font-size: 1.15rem;
+  color: var(--primary);
+}
+
+/* Botón "Implementar rutinas de mantenimiento" bajo el detalle */
+.bloque-rutina { display: block; margin: 12px 0; }
+
+/* ── Celular: cada línea del detalle es una tarjeta con sus campos rotulados ──
+   (no se usa scroll horizontal: recortaría la lista de sugerencias del buscador) */
+@media (max-width: 640px) {
+  .detalle-table {
+    min-width: 0;
+  }
+
+  .detalle-table thead {
+    display: none;
+  }
+
+  .detalle-table,
+  .detalle-table tbody {
+    display: block;
+  }
+
+  .detalle-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 8px);
+    position: relative;
+  }
+
+  .detalle-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+
+  .detalle-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  /* El producto ocupa todo el ancho; deja sitio al botón ✕ arriba a la derecha */
+  .detalle-table td.producto-cell {
+    grid-column: 1 / -1;
+    padding-right: 44px;
+  }
+
+  .detalle-table td.celda-quitar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+  }
+
+  .detalle-table td.celda-quitar::before {
+    content: none;
+  }
+
+  .totales {
+    max-width: none;
+  }
+}
+

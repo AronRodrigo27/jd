@@ -1,0 +1,29 @@
+﻿# Base Oracle de PRÁCTICA para los trabajos de BD2 (S1 a S14).
+# Es una copia de los datos de desarrollo: aquí se prueban privilegios, tablespaces, particiones,
+# ARCHIVELOG/RMAN y bloqueos sin tocar el 4200 (contenedor SGE-JD) ni el 4300 (sge-jd-oracle-prod).
+# Lo que funcione se integra después al proyecto (scripts del backend) junto con LP2.
+#
+# La PC aguanta un solo Oracle a la vez: apagar el de desarrollo o el de producción antes de encender este.
+#   docker compose -f bd2/compose-bd2.yml --env-file bd2/.env.bd2 up -d
+#   docker compose -f bd2/compose-bd2.yml --env-file bd2/.env.bd2 stop
+name: sge-jd-bd2
+services:
+  oracle-bd2:
+    # S13: la variante completa trae RMAN; 23-slim no (S1 a S12 usaron 23-slim).
+    # Integración con LP2: para ensayar sobre una copia de desarrollo hace falta la MISMA imagen que desarrollo
+    # (BD2_IMAGEN=gvenzl/oracle-free:23-slim): la completa crea la base con zonas horarias v43 y Data Pump
+    # rechaza el respaldo de desarrollo (v45) con ORA-39405.
+    image: ${BD2_IMAGEN:-gvenzl/oracle-free:23}
+    container_name: sge-jd-bd2
+    ports:
+      - "1523:1521"
+    environment:
+      ORACLE_PASSWORD: ${BD2_ORACLE_PASSWORD:?Falta BD2_ORACLE_PASSWORD en bd2/.env.bd2}
+      APP_USER: "jdrefrigeracion"
+      APP_USER_PASSWORD: ${BD2_OWNER_PASSWORD:?Falta BD2_OWNER_PASSWORD en bd2/.env.bd2}
+      # Hora de Lima, como en compose-prod.yml (hallazgo de BD2 S2: sin esto SYSDATE va en UTC, 5 h adelante)
+      TZ: America/Lima
+    volumes:
+      - oracle-bd2-datos:/opt/oracle/oradata
+volumes:
+  oracle-bd2-datos:

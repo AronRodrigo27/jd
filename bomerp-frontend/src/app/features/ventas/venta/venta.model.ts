@@ -1,0 +1,79 @@
+import { RutinaMantenimiento } from '../../postventa/mantenimiento/rutina-mantenimiento';
+export interface DetalleVentaResponse {
+  productoNombre: string;
+  cantidad: number;
+  precioUnitario: number;
+  /** % de descuento de la línea (0 si no hay). */
+  descuentoPorcentaje: number;
+  subtotalDetalle: number;
+  /** Precio editado al registrar (auditoría M1): el de catálogo, quién y por qué; null = de catálogo. */
+  precioCatalogo?: number | null;
+  precioEditadoPor?: string | null;
+  motivoPrecio?: string | null;
+}
+
+export type EstadoVenta = 'REGISTRADA' | 'ANULADA';
+
+export interface VentaResponse {
+  id: number;
+  clienteId: number;
+  clienteNombre: string;
+  proformaOrigenId: number | null;
+  fechaVenta: string;
+  tipoPago: 'CONTADO' | 'CREDITO';
+  estado: EstadoVenta;
+  estadoPago: 'PENDIENTE' | 'PAGADO' | 'ATRASADO';
+  fechaLimitePago: string | null;
+  moneda: 'SOLES' | 'DOLARES';
+  /** Soles por dólar usado en la venta (null si no se registró). */
+  tipoCambio: number | null;
+  subtotal: number;
+  igv: number;
+  total: number;
+  /** Detracción (SPOT) o retención del IGV calculada al registrar la venta. */
+  tipoDeduccion: 'NINGUNA' | 'DETRACCION' | 'RETENCION';
+  porcentajeDeduccion: number | null;
+  montoDeduccion: number | null;
+  /** Lo que el cliente le paga directamente a JD (total − deducción). */
+  netoACobrar: number;
+  /** null si la venta aún no tiene factura/boleta emitida. */
+  comprobanteId: number | null;
+  detalles: DetalleVentaResponse[];
+  /** Anulación (auditoría M4): cuándo, quién (null en las anuladas antes del historial) y por qué. */
+  fechaAnulacion: string | null;
+  anuladoPor: string | null;
+  motivoAnulacion: string | null;
+}
+
+/** Filtros opcionales del reporte (GET /ventas). Fechas en formato yyyy-MM-dd. */
+export interface FiltroVentas {
+  estado?: EstadoVenta | '';
+  desde?: string;
+  hasta?: string;
+}
+
+export interface ItemVentaDTO {
+  productoId: number;
+  cantidad: number;
+  /** % negociado de la línea (0 a tope del usuario). */
+  descuentoPorcentaje?: number;
+  /** Precio editado en la moneda de la venta (solo sube, con motivo y permiso); sin él, el de catálogo. */
+  precioUnitario?: number | null;
+  motivoPrecio?: string | null;
+}
+
+/** Lo único que viaja al backend: subtotales, IGV y total los calcula el servidor. */
+export interface VentaDirectaRequest {
+  clienteId: number;
+  items: ItemVentaDTO[];
+  tipoPago: 'CONTADO' | 'CREDITO';
+  diasCredito?: number;
+  /** Moneda en la que se cobra; los precios se convierten con el tipo de cambio. */
+  moneda: 'SOLES' | 'DOLARES';
+  /** Soles por dólar (el de SUNAT del día o el negociado). */
+  tipoCambio?: number | null;
+  /** Botón "Implementar rutinas de mantenimiento" (null = la venta no programa visitas). */
+  rutinaMantenimiento?: RutinaMantenimiento | null;
+  /** Fecha real de la venta (AAAA-MM-DD), hasta 30 días atrás y con permiso; null = hoy (auditoría M3). */
+  fechaVenta?: string | null;
+}

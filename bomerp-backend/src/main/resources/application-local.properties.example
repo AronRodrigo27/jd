@@ -1,0 +1,14 @@
+# Copia este archivo como application-local.properties (queda ignorado por git) y completa tus valores.
+spring.datasource.password=
+spring.mail.username=
+spring.mail.password=
+decolecta.token=
+# true para trabajar sin internet (RUC/DNI con datos de prueba)
+app.consulta-documentos.simulado=false
+app.notificaciones.correo-oficina=
+
+# Facturación electrónica: "sunat" envía directo a SUNAT firmando con certificados/beta-prueba.p12. Sin esto queda
+# "simulado". Con "sunat" hay que declarar el ambiente (BETA en desarrollo; sin él, el backend no arranca).
+# app.sunat.ambiente=BETA
+# app.facturacion.modo=sunat
+# app.sunat.certificado-clave=

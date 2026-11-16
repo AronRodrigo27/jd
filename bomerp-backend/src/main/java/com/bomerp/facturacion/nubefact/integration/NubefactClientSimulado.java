@@ -1,0 +1,43 @@
+package com.bomerp.facturacion.nubefact.integration;
+import com.bomerp.facturacion.ose.integration.OseClient;
+import com.bomerp.facturacion.ose.integration.OseClient.RespuestaOse;
+import com.bomerp.facturacion.ose.integration.OseClient.Resultado;
+import com.bomerp.facturacion.comprobante.entity.Comprobante;
+import com.bomerp.facturacion.notacredito.entity.NotaCredito;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Implementación simulada de Nubefact.
+ * En un escenario real, aquí se usaría RestTemplate para hacer un POST
+ * a https://api.nubefact.com/api/v1/ con el JSON requerido.
+ */
+@Slf4j
+@Component
+// Por defecto (sin app.facturacion.modo o con "simulado"); con "sunat" se usa SunatDirectoClient
+@ConditionalOnProperty(name = "app.facturacion.modo", havingValue = "simulado", matchIfMissing = true)
+public class NubefactClientSimulado implements OseClient {
+
+    @Override
+    public RespuestaOse emitir(Comprobante comprobante) {
+        log.info("[SIMULADO - OSE] Comprobante {}-{} enviado a Nubefact", comprobante.getSerie(), comprobante.getNumero());
+        
+        // Simulamos una respuesta exitosa del OSE
+        String urlBase = "https://www.nubefact.com/api/v1/demo/pdf/";
+        String pdf = urlBase + comprobante.getSerie() + "-" + comprobante.getNumero() + ".pdf";
+        String xml = urlBase + comprobante.getSerie() + "-" + comprobante.getNumero() + ".xml";
+
+        return new RespuestaOse(Resultado.ACEPTADO, 0, "Simulado: no se envió a SUNAT", pdf, xml, null, null);
+    }
+
+    @Override
+    public RespuestaOse emitirNotaCredito(NotaCredito notaCredito) {
+        String numero = notaCredito.getSerie() + "-" + notaCredito.getNumero();
+        log.info("[SIMULADO - OSE] Nota de crédito {} (anula {}) enviada a Nubefact", numero, notaCredito.getNumeroComprobanteReferencia());
+
+        String urlBase = "https://www.nubefact.com/api/v1/demo/pdf/";
+        return new RespuestaOse(Resultado.ACEPTADO, 0, "Simulado: no se envió a SUNAT", urlBase + numero + ".pdf", urlBase + numero + ".xml", null, null);
+    }
+}

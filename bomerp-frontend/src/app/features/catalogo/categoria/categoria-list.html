@@ -1,0 +1,57 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-0" style="font-weight: 700;">Categorías de Catálogo</h2>
+    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.9rem;">
+      Administre las categorías disponibles para clasificar productos
+    </p>
+  </div>
+  @if (puedeCatalogo()) {
+    <a routerLink="/catalogo/categorias/nueva" class="btn btn-primary">
+      + Nueva Categoría
+    </a>
+  }
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 30%;"><app-orden campo="nombre" [orden]="orden()" (cambiar)="orden.set($event)">Nombre</app-orden></th>
+          <th style="width: 50%;"><app-orden campo="descripcion" [orden]="orden()" (cambiar)="orden.set($event)">Descripción</app-orden></th>
+          <th style="width: 20%; text-align: right;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (cat of visibles(); track cat.id) {
+          <tr>
+            <td>
+              <strong style="color: var(--text-main);">{{ cat.nombre }}</strong>
+            </td>
+            <td>
+              <span style="color: var(--text-muted);">{{ cat.descripcion || 'Sin descripción' }}</span>
+            </td>
+            <td style="text-align: right;">
+              @if (puedeCatalogo()) {
+                <a class="btn btn-outline-secondary btn-sm" [routerLink]="['/catalogo/categorias', cat.id, 'editar']">
+                  Editar
+                </a>
+                <button class="btn btn-danger btn-sm" style="margin-left: 8px;" (click)="eliminar(cat.id!)">
+                  Eliminar
+                </button>
+              } @else {
+                <span style="color: var(--text-muted); font-size: 0.85rem;">Solo lectura</span>
+              }
+            </td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="3" style="text-align: center; padding: 40px; color: var(--text-muted);">
+              No hay categorías registradas en el catálogo.
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

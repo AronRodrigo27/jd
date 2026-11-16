@@ -1,0 +1,63 @@
+# Publica la documentación en GitHub Pages con MkDocs + Material (como el sitio del curso).
+# Las páginas salen de docs/ de master (el README se divide por secciones, más ADS en docs/ads/), de bd2/ y
+# migracion_bd2/ (BD2 e integración con LP2) y de lp2-demo.md, que vive en la rama frontend (ver sitio/armar.py).
+# Corre al cambiar docs/, bd2/, migracion_bd2/ o sitio/ en master. Si solo cambió lp2-demo.md (rama frontend), ejecutarlo a mano:
+#   gh workflow run docs.yml      (o Actions → Documentación → Run workflow)
+name: Documentación
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - 'bd2/**'
+      - 'migracion_bd2/**'
+      - 'sitio/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Traer lp2-demo.md de la rama frontend
+        uses: actions/checkout@v7
+        with:
+          ref: frontend
+          path: frontend
+          sparse-checkout: docs
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Instalar MkDocs
+        run: pip install -r sitio/requirements.txt
+
+      - name: Armar y compilar el sitio
+        run: |
+          python sitio/armar.py --lp2 frontend/docs/lp2-demo.md
+          mkdocs build --strict -f sitio/mkdocs.yml -d ../_site
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v5

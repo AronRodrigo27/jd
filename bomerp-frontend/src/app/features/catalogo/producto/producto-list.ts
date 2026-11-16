@@ -1,0 +1,150 @@
+// Ruta en el repositorio: src/app/features/catalogo/producto/producto-list.ts
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { AuthService } from '../../../core/auth/auth.service';
+import { DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
+import { ProductoService } from './producto-service';
+import { Producto, SECTORES, controlaStock } from './producto.model';
+import { CategoriaService } from '../categoria/categoria-service';
+import { Categoria } from '../categoria/categoria.model';
+import { IconoComponent } from '../../../core/layout/icono';
+import { TipoCambioService } from '../../../core/services/tipo-cambio-service';
+import { CamposOrden, Orden, OrdenComponent, ordenarLista } from '../../../core/layout/orden';
+
+/** Valor del filtro: todas, una categoría (id) o los productos aún sin categoría. */
+type FiltroCategoria = 'TODAS' | 'SIN_CATEGORIA' | number;
+
+@Component({
+  selector: 'app-producto-list',
+  imports: [IconoComponent, OrdenComponent, RouterLink, FormsModule, DecimalPipe],
+  templateUrl: './producto-list.html',
+})
+export class ProductoList implements OnInit {
+  /** Solo ADMIN modifica/elimina/anula (el backend lo vuelve a exigir con 403). */
+  private readonly auth = inject(AuthService);
+  /** ADMIN o asistente con el permiso CATALOGO delegado (el backend exige lo mismo). */
+  readonly puedeCatalogo = computed(() => this.auth.puede('CATALOGO'));
+
+  private readonly productoService = inject(ProductoService);
+  private readonly categoriaService = inject(CategoriaService);
+  private readonly tipoCambioService = inject(TipoCambioService);
+
+  protected readonly productos = signal<Producto[]>([]);
+  protected readonly categorias = signal<Categoria[]>([]);
+  protected readonly error = signal<string | null>(null);
+  protected readonly mensaje = signal<string | null>(null);
+  protected readonly loading = signal(false);
+  protected filtro: FiltroCategoria = 'TODAS';
+  // CAMBIO SOLICITADO: ambos límites son opcionales y se expresan en soles, sin IGV.
+  protected precioMinimo: number | null = null;
+  protected precioMaximo: number | null = null;
+
+  /** Venta SUNAT de hoy (solo para ordenar por precio; sin él se compara el número tal cual). */
+  private readonly tipoCambioHoy = signal<number | null>(null);
+  /** Columna por la que se ordena (clic en el encabezado); null = como llegan del servidor. */
+  protected readonly orden = signal<Orden | null>(null);
+  /** Precio y stock: números (los servicios sin stock quedan al final). */
+  private readonly camposOrden: CamposOrden<Producto> = {
+    nombre: (p) => p.nombre,
+    categoria: (p) => p.categoriaNombre,
+    sector: (p) => this.etiquetaSector(p.sector),
+    // En soles con el tipo de cambio de hoy, para comparar productos en dólares con los de soles
+    precio: (p) => (p.moneda === 'DOLARES' ? (p.precioVenta ?? 0) * (this.tipoCambioHoy() ?? 1) : p.precioVenta),
+    stock: (p) => (controlaStock(p.sector) ? (p.stockActual ?? 0) : null),
+  };
+
+  /** Con el filtro "sin categoría" se traen todos y se filtra aquí (el backend filtra por id). */
+  protected readonly visibles = computed(() =>
+    ordenarLista(
+      this.productosFiltradosPorPrecio(),
+      this.orden(),
+      this.camposOrden,
+    ),
+  );
+  protected readonly sinCategoria = signal(0);
+  private readonly filtroActual = signal<FiltroCategoria>('TODAS');
+
+  // CAMBIO SOLICITADO (función del rango, líneas 69–85): conserva la categoría y compara límites inclusivos.
+  private productosFiltradosPorPrecio(): Producto[] {
+    const base = this.filtroActual() === 'SIN_CATEGORIA'
+      ? this.productos().filter((p) => !p.categoriaId)
+      : this.productos();
+    const minimo = this.precioMinimo;
+    const maximo = this.precioMaximo;
+
+    if ((minimo !== null && minimo < 0) || (maximo !== null && maximo < 0) ||
+        (minimo !== null && maximo !== null && minimo > maximo)) return [];
+
+    return base.filter((p) => {
+      const precioEnSoles = p.moneda === 'DOLARES'
+        ? (p.precioVenta ?? 0) * (this.tipoCambioHoy() ?? 1)
+        : (p.precioVenta ?? 0);
+      return (minimo === null || precioEnSoles >= minimo) &&
+        (maximo === null || precioEnSoles <= maximo);
+    });
+  }
+
+  ngOnInit(): void {
+    this.tipoCambioService.hoy().subscribe({ next: (tc) => this.tipoCambioHoy.set(tc.venta), error: () => {} });
+    this.categoriaService.listar().subscribe({
+      next: (data) => this.categorias.set(data),
+      error: () => this.error.set('No se pudieron cargar las categorías.'),
+    });
+    this.cargar();
+  }
+
+  cargar(): void {
+    this.loading.set(true);
+    this.error.set(null);
+    this.filtroActual.set(this.filtro);
+    const categoriaId = typeof this.filtro === 'number' ? this.filtro : null;
+    this.productoService.listar(categoriaId).subscribe({
+      next: (data) => {
+        this.productos.set(data);
+        if (categoriaId === null) this.sinCategoria.set(data.filter((p) => !p.categoriaId).length);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.error.set('No se pudo cargar la lista de productos.');
+        this.loading.set(false);
+      },
+    });
+  }
+
+  verSinCategoria(): void {
+    this.filtro = 'SIN_CATEGORIA';
+    this.cargar();
+  }
+
+  eliminar(p: Producto): void {
+    if (!confirm(`¿Eliminar el producto "${p.nombre}"? Esta acción no se puede deshacer.`)) return;
+    this.mensaje.set(null);
+    this.productoService.eliminar(p.id).subscribe({
+      next: () => {
+        this.mensaje.set(`Producto "${p.nombre}" eliminado.`);
+        this.cargar();
+      },
+      error: (err: HttpErrorResponse) => {
+        // 409: el producto ya figura en ventas, proformas o compras
+        this.error.set(err.status === 409 ? err.error?.message : 'No se pudo eliminar el producto.');
+      },
+    });
+  }
+
+  protected etiquetaSector(sector?: string): string {
+    return SECTORES.find((s) => s.valor === sector)?.etiqueta ?? sector ?? '—';
+  }
+
+  protected simbolo(moneda?: string): string {
+    return moneda === 'DOLARES' ? 'US$' : 'S/';
+  }
+
+  protected controlaStock = controlaStock;
+}
+
+// Resumen del cambio (líneas 40–85): se agregaron los límites y productosFiltradosPorPrecio().
+// Flujo: ngModel actualiza los límites; visibles() combina categoría y rango, convierte dólares a soles
+// con el tipo de cambio de venta actual y ordena los resultados. Los extremos son inclusivos.
+// Importes negativos o mínimo mayor que máximo producen lista vacía.

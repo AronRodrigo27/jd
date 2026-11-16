@@ -1,0 +1,83 @@
+import { Component, OnInit, signal, inject, computed } from '@angular/core';
+import { AuthService } from '../../../core/auth/auth.service';
+import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
+import { ProveedorService } from './proveedor-service';
+import { Proveedor } from './proveedor.model';
+import { CamposOrden, Orden, OrdenComponent, ordenarLista } from '../../../core/layout/orden';
+
+/** Columnas ordenables con un clic en el encabezado. */
+const CAMPOS_ORDEN: CamposOrden<Proveedor> = {
+  id: (x) => x.id,
+  nombre: (x) => x.nombreORazonSocial,
+  tipo: (x) => (x.tipo === 'EMPRESA' ? 'Empresa' : 'Persona'),
+  documento: (x) => x.ruc ?? x.dni,
+};
+
+@Component({
+  selector: 'app-proveedor-list',
+  standalone: true,
+  imports: [CommonModule, RouterLink, OrdenComponent],
+  templateUrl: './proveedor-list.html',
+  styleUrl: './proveedor-list.css',
+})
+export class ProveedorListComponent implements OnInit {
+  /** Solo ADMIN modifica/elimina/anula (el backend lo vuelve a exigir con 403). */
+  private readonly auth = inject(AuthService);
+  /** ADMIN o asistente con el permiso ELIMINAR delegado (el backend exige lo mismo). */
+  readonly puedeEliminar = computed(() => this.auth.puede('ELIMINAR'));
+
+  proveedores = signal<Proveedor[]>([]);
+  cargando = signal(true);
+  error = signal<string | null>(null);
+  mensaje = signal<string | null>(null);
+  busqueda = signal('');
+  /** Columna por la que se ordena; null = como llegan del servidor. */
+  orden = signal<Orden | null>(null);
+
+  constructor(private proveedorService: ProveedorService) {}
+
+  ngOnInit(): void {
+    this.cargar();
+  }
+
+  cargar(): void {
+    this.cargando.set(true);
+    this.proveedorService.listarTodos().subscribe({
+      next: (data) => { this.proveedores.set(data); this.cargando.set(false); },
+      error: () => { this.error.set('No se pudo cargar la lista de proveedores.'); this.cargando.set(false); },
+    });
+  }
+
+  get proveedoresFiltrados(): Proveedor[] {
+    const q = this.busqueda().toLowerCase();
+    const todos = ordenarLista(this.proveedores(), this.orden(), CAMPOS_ORDEN);
+    if (!q) return todos;
+    return todos.filter(p =>
+      p.nombreORazonSocial.toLowerCase().includes(q) ||
+      (p.ruc ?? '').includes(q) ||
+      (p.dni ?? '').includes(q) ||
+      (p.correo ?? '').toLowerCase().includes(q)
+    );
+  }
+
+  onBuscar(event: Event): void {
+    this.busqueda.set((event.target as HTMLInputElement).value);
+  }
+
+  eliminar(p: Proveedor): void {
+    if (!confirm(`¿Eliminar al proveedor "${p.nombreORazonSocial}"?`)) return;
+    this.error.set(null);
+    this.mensaje.set(null);
+    this.proveedorService.eliminar(p.id!).subscribe({
+      next: () => {
+        this.mensaje.set(`Proveedor "${p.nombreORazonSocial}" eliminado.`);
+        this.cargar();
+      },
+      error: (err: HttpErrorResponse) =>
+        // 409: tiene compras registradas
+        this.error.set(err.status === 409 ? err.error?.message : 'No se pudo eliminar el proveedor.'),
+    });
+  }
+}

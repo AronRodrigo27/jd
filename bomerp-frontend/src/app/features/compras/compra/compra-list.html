@@ -1,0 +1,176 @@
+<!--
+  Ruta: bomerp-frontend/src/app/features/compras/compra/compra-list.html
+  CAMBIO SOLICITADO: mostrar el avance de entrega y capturar recepciones parciales en la compra existente.
+-->
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-0" style="font-weight: 700;">Compras</h2>
+    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.9rem;">
+      Facturas de proveedores — el stock aumenta conforme se reciben las unidades
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-secondary" (click)="exportarExcel()" [disabled]="exportando()">
+      @if (!exportando()) { <app-icono nombre="descargar" /> }
+      {{ exportando() ? 'Generando…' : 'Exportar a Excel' }}
+    </button>
+    <a routerLink="/compras/por-pagar" class="btn btn-outline-secondary">Cuentas por pagar</a>
+    <a routerLink="/compras/nueva" class="btn btn-primary">+ Nueva Compra</a>
+  </div>
+</div>
+
+<div class="card d-flex align-items-center gap-3" style="padding: 16px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end;">
+  <div>
+    <label class="form-label" for="fProveedor">Proveedor</label>
+    <select id="fProveedor" class="form-select" [(ngModel)]="proveedorId">
+      <option [ngValue]="null">Todos</option>
+      @for (p of proveedores(); track p.id) {
+        <option [ngValue]="p.id">{{ p.nombreORazonSocial }}</option>
+      }
+    </select>
+  </div>
+  <div>
+    <label class="form-label" for="fDesde">Desde</label>
+    <input id="fDesde" type="date" class="form-control" [(ngModel)]="desde">
+  </div>
+  <div>
+    <label class="form-label" for="fHasta">Hasta</label>
+    <input id="fHasta" type="date" class="form-control" [(ngModel)]="hasta">
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary" (click)="buscar()">Buscar</button>
+    <button class="btn btn-outline-secondary" (click)="limpiar()">Limpiar</button>
+  </div>
+</div>
+
+@if (errorMessage()) {
+  <div style="background-color: var(--danger-light); color: var(--texto-peligro); padding: 12px 16px; border-radius: 8px; margin-bottom: 1rem; border: 1px solid var(--borde-peligro); font-size: 0.9rem;">
+    {{ errorMessage() }}
+  </div>
+}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 80px;"><app-orden campo="id" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">ID</app-orden></th>
+          <th><app-orden campo="proveedor" [orden]="orden()" (cambiar)="ordenar($event)">Proveedor</app-orden></th>
+          <th class="text-center" style="width: 130px;"><app-orden campo="fecha" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">Fecha</app-orden></th>
+          <th class="text-center" style="width: 140px;"><app-orden campo="factura" [orden]="orden()" (cambiar)="ordenar($event)">N° Factura</app-orden></th>
+          <th class="text-center" style="width: 110px;">Moneda</th>
+          <th class="text-center" style="width: 100px;">Ítems</th>
+          <th style="text-align: right; width: 140px;"><app-orden campo="total" primero="desc" [orden]="orden()" (cambiar)="ordenar($event)">Total</app-orden></th>
+          <th class="text-center" style="width: 150px;">Pago</th>
+          <th class="text-center" style="width: 190px;">Entrega</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (c of compras(); track c.id) {
+          <tr>
+            <td>
+              <span class="badge">#{{ c.id }}</span>
+            </td>
+            <td>
+              <strong>{{ c.proveedor?.nombreORazonSocial || 'Proveedor #' + c.id }}</strong>
+              @if (c.proveedor) {
+                <a [routerLink]="['/proveedores', c.proveedor.id, 'historial']" style="margin-left: 6px; font-size: 0.8rem;">historial</a>
+              }
+            </td>
+            <td class="text-center" style="color: var(--text-muted); font-size: 0.88rem;">
+              {{ c.fechaCompra }}
+            </td>
+            <td class="text-center">
+              @if (c.numeroFactura) {
+                <span style="font-family: monospace; font-size: 0.85rem;">{{ c.numeroFactura }}</span>
+              } @else {
+                <span style="color: var(--text-muted); font-size: 0.85rem;">—</span>
+              }
+            </td>
+            <td class="text-center">
+              <span class="badge" style="background-color: var(--suave); color: var(--text-main);">
+                {{ c.moneda }}
+              </span>
+            </td>
+            <td class="text-center">
+              <span class="badge" style="background-color: var(--primary-light); color: var(--primary);">
+                {{ getTotalDetalles(c) }} uds.
+              </span>
+            </td>
+            <td style="text-align: right; font-weight: 700; color: var(--text-main);">
+              {{ c.total | currency: (c.moneda === 'SOLES' ? 'PEN ' : 'USD ') }}
+              @if (c.igv !== null && c.igv !== undefined) {
+                <div class="muted" style="font-weight: 400;" title="Subtotal sin IGV · IGV de la compra (crédito fiscal)">
+                  {{ c.subtotal | number: '1.2-2' }} + IGV {{ c.igv | number: '1.2-2' }}
+                </div>
+              }
+            </td>
+            <td class="text-center">
+              @if (c.tipoPago === 'CREDITO' && c.estadoPago === 'PENDIENTE') {
+                <a routerLink="/compras/por-pagar" class="badge badge-warning" title="Ver en Cuentas por pagar">
+                  Debe {{ (c.saldo ?? c.total) | currency: (c.moneda === 'SOLES' ? 'S/ ' : 'US$ ') }}
+                </a>
+                @if (c.fechaVencimiento) { <small class="d-block muted">vence {{ c.fechaVencimiento | date: 'dd/MM/yyyy' }}</small> }
+              } @else {
+                <span class="badge badge-success">{{ c.tipoPago === 'CREDITO' ? 'Pagada' : 'Al contado' }}</span>
+              }
+            </td>
+            <td class="text-center">
+              @if (c.estadoEntrega === 'COMPLETA') {
+                <span class="badge badge-success">Completa</span>
+              } @else {
+                <span class="badge badge-warning">{{ c.estadoEntrega === 'PARCIAL' ? 'Parcial' : 'Pendiente' }}</span>
+                <button type="button" class="btn btn-sm btn-primary d-block mx-auto mt-1"
+                        (click)="abrirRecepcion(c)">Recibir unidades</button>
+              }
+            </td>
+          </tr>
+          @if (compraRecepcion()?.id === c.id) {
+            <tr>
+              <td colspan="9" style="background: var(--surface-muted); padding: 18px;">
+                <strong>Recepción de compra #{{ c.id }} · Factura {{ c.numeroFactura }}</strong>
+                <span class="muted"> — el total de la factura no cambia.</span>
+                <div class="table-responsive mt-2">
+                  <table class="table mb-2">
+                    <thead><tr><th>Producto</th><th class="text-center">Comprado</th><th class="text-center">Recibido</th><th class="text-center">Pendiente</th><th style="width: 180px;">Llegó ahora</th></tr></thead>
+                    <tbody>
+                      @for (d of c.detalles; track d.id) {
+                        @if (d.cantidadPendiente > 0) {
+                          <tr>
+                            <td>{{ d.producto.nombre }}</td>
+                            <td class="text-center">{{ d.cantidad }}</td>
+                            <td class="text-center">{{ d.cantidadRecibida }}</td>
+                            <td class="text-center">{{ d.cantidadPendiente }}</td>
+                            <td><input type="number" class="form-control form-control-sm" min="0"
+                                       [max]="d.cantidadPendiente" [attr.aria-label]="'Unidades recibidas de ' + d.producto.nombre"
+                                       [(ngModel)]="cantidadesRecepcion[d.id]" [ngModelOptions]="{standalone: true}"></td>
+                          </tr>
+                        }
+                      }
+                    </tbody>
+                  </table>
+                </div>
+                <div class="d-flex justify-content-end gap-2">
+                  <button type="button" class="btn btn-outline-secondary" (click)="cancelarRecepcion()">Cancelar</button>
+                  <button type="button" class="btn btn-primary" [disabled]="guardandoRecepcion()"
+                          (click)="guardarRecepcion(c)">{{ guardandoRecepcion() ? 'Guardando…' : 'Registrar recepción' }}</button>
+                </div>
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr>
+            <td colspan="9" style="text-align: center; padding: 40px; color: var(--text-muted);">
+              No se encontraron compras registradas.
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <app-paginador [pagina]="pagina()" [tamano]="tamano()" [total]="total()" [totalPaginas]="totalPaginas()"
+                 (paginaCambia)="irAPagina($event)" (tamanoCambia)="cambiarTamano($event)" />
+</div>
+
+<!-- Flujo: cada recepción registra solo las unidades llegadas ahora; el saldo queda en la factura para
+     recepciones futuras. El total y el estado de pago se conservan; el stock sube según lo recibido. -->

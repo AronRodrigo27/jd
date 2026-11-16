@@ -1,0 +1,235 @@
+package com.bomerp.facturacion.pdf.service;
+
+import com.bomerp.config.empresa.EmpresaProperties;
+import com.bomerp.facturacion.comprobante.entity.Comprobante;
+import com.bomerp.ventas.detalleventa.entity.DetalleVenta;
+import com.bomerp.ventas.venta.entity.Venta;
+import com.lowagie.text.*;
+import com.lowagie.text.pdf.PdfPCell;
+import com.lowagie.text.pdf.PdfPTable;
+import com.lowagie.text.pdf.PdfWriter;
+import org.springframework.stereotype.Service;
+
+import java.awt.Color;
+import java.io.File;
+import java.io.FileOutputStream;
+
+@Service
+public class GeneradorPdfFacturacionService {
+
+    private final EmpresaProperties empresa;
+
+    public GeneradorPdfFacturacionService(EmpresaProperties empresa) {
+        this.empresa = empresa;
+    }
+
+    /** El PDF en memoria (para adjuntarlo al correo o descargarlo), sin dejar archivos temporales. */
+    public byte[] generarFacturaPdfBytes(Comprobante comprobante) throws Exception {
+        File archivo = generarFacturaPdf(comprobante);
+        try {
+            return java.nio.file.Files.readAllBytes(archivo.toPath());
+        } finally {
+            archivo.delete();
+        }
+    }
+
+    /** Logo de JD desde el classpath: funciona igual en desarrollo y dentro de la imagen Docker. */
+    private static Image logo() throws Exception {
+        try (java.io.InputStream in = GeneradorPdfFacturacionService.class.getResourceAsStream("/static/images/logo.png")) {
+            if (in == null) throw new java.io.FileNotFoundException("static/images/logo.png");
+            return Image.getInstance(in.readAllBytes());
+        }
+    }
+
+    public File generarFacturaPdf(Comprobante comprobante) throws Exception {
+        String fileName = comprobante.getTipo().name() + "_" + comprobante.getSerie() + "-" + comprobante.getNumero() + ".pdf";
+        File pdfFile = File.createTempFile("Comprobante_", "_" + fileName);
+        
+        try (Document document = new Document(PageSize.A4)) {
+            PdfWriter.getInstance(document, new FileOutputStream(pdfFile));
+            document.open();
+
+            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18, Color.BLACK);
+            Font redTitleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16, Color.RED);
+            Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12, Color.DARK_GRAY);
+            Font boldFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12, Color.BLACK);
+            Font normalFont = FontFactory.getFont(FontFactory.HELVETICA, 12, Color.BLACK);
+            Font smallFont = FontFactory.getFont(FontFactory.HELVETICA, 10, Color.GRAY);
+
+            // Tabla principal para el Header (Logo Izquierda, Cuadro RUC Derecha)
+            PdfPTable headerTable = new PdfPTable(2);
+            headerTable.setWidthPercentage(100);
+            headerTable.setWidths(new float[]{2f, 1.2f});
+            
+            // Celda Izquierda: Logo y Empresa
+            PdfPCell leftCell = new PdfPCell();
+            leftCell.setBorder(Rectangle.NO_BORDER);
+            try {
+                Image logo = logo();
+                logo.scaleToFit(140, 140);
+                logo.setAlignment(Element.ALIGN_LEFT);
+                leftCell.addElement(logo);
+            } catch (Exception e) {
+                leftCell.addElement(new Paragraph(empresa.razonSocial(), titleFont));
+            }
+            leftCell.addElement(new Paragraph(empresa.razonSocial(), boldFont));
+            leftCell.addElement(new Paragraph(empresa.direccion(), normalFont));
+            headerTable.addCell(leftCell);
+            
+            // Celda Derecha: Cuadro RUC y Número de Factura
+            PdfPCell rightCell = new PdfPCell();
+            rightCell.setBorder(Rectangle.BOX);
+            rightCell.setBorderWidth(1.5f);
+            rightCell.setPadding(10f);
+            rightCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            rightCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            
+            Paragraph rucEmpresa = new Paragraph("RUC: " + empresa.ruc(), boldFont);
+            rucEmpresa.setAlignment(Element.ALIGN_CENTER);
+            rightCell.addElement(rucEmpresa);
+            
+            String tipoTexto = comprobante.getTipo() == Comprobante.TipoComprobante.FACTURA ? "FACTURA ELECTRÓNICA" : "BOLETA ELECTRÓNICA";
+            Paragraph tipoComp = new Paragraph(tipoTexto, titleFont);
+            tipoComp.setAlignment(Element.ALIGN_CENTER);
+            rightCell.addElement(tipoComp);
+            
+            Paragraph numComp = new Paragraph(comprobante.getSerie() + "-" + comprobante.getNumero(), redTitleFont);
+            numComp.setAlignment(Element.ALIGN_CENTER);
+            rightCell.addElement(numComp);
+            
+            headerTable.addCell(rightCell);
+            document.add(headerTable);
+            
+            document.add(new Paragraph(" "));
+            
+            // Datos del Cliente
+            // El receptor tal como se emitió el comprobante: debe coincidir con el XML que recibió SUNAT, aunque
+            // el cliente se haya editado después. Sin datos guardados (no debería haber), los del cliente actual.
+            boolean guardado = comprobante.getReceptorNumDoc() != null;
+            var cliente = comprobante.getVenta().getCliente();
+            String nombreReceptor = guardado ? comprobante.getReceptorNombre() : cliente.getNombreORazonSocial();
+            String ruc = guardado ? ("6".equals(comprobante.getReceptorTipoDoc()) ? comprobante.getReceptorNumDoc() : null) : cliente.getRuc();
+            String dni = guardado ? ("1".equals(comprobante.getReceptorTipoDoc()) ? comprobante.getReceptorNumDoc() : null) : cliente.getDni();
+            String direccion = guardado ? comprobante.getReceptorDireccion() : cliente.getDireccion();
+            document.add(new Paragraph("SEÑOR(ES): " + nombreReceptor, boldFont));
+            if (ruc != null) {
+                document.add(new Paragraph("RUC: " + ruc, normalFont));
+            } else if (dni != null) {
+                document.add(new Paragraph("DNI: " + dni, normalFont));
+            }
+            if (direccion != null) {
+                document.add(new Paragraph("DIRECCIÓN: " + direccion, normalFont));
+            }
+            document.add(new Paragraph("FECHA DE EMISIÓN: " + comprobante.getFechaEmision(), normalFont));
+            document.add(new Paragraph("MONEDA: " + comprobante.getVenta().getMoneda(), normalFont));
+            if (comprobante.getVenta().getTipoCambio() != null) {
+                // SUNAT exige el tipo de cambio cuando el comprobante es en moneda extranjera
+                document.add(new Paragraph("TIPO DE CAMBIO: S/ " + comprobante.getVenta().getTipoCambio()
+                        .setScale(3, java.math.RoundingMode.HALF_UP) + " por US$ 1", normalFont));
+            }
+            
+            document.add(new Paragraph(" "));
+            
+            // Tabla de Detalles
+            PdfPTable table = new PdfPTable(5);
+            table.setWidthPercentage(100);
+            table.setWidths(new float[]{4f, 0.8f, 1.5f, 0.9f, 1.5f});
+
+            agregarCeldaCabecera(table, "Descripción", headerFont);
+            agregarCeldaCabecera(table, "Cant.", headerFont);
+            agregarCeldaCabecera(table, "V. Unit", headerFont);
+            agregarCeldaCabecera(table, "Dscto.", headerFont);
+            agregarCeldaCabecera(table, "Subtotal", headerFont);
+            
+            for (DetalleVenta item : comprobante.getVenta().getDetalles()) {
+                // El nombre guardado al vender, el mismo que va en el XML (renombrar el producto no lo cambia)
+                agregarCeldaItem(table, item.getDescripcion(), normalFont, Element.ALIGN_LEFT);
+                agregarCeldaItem(table, String.valueOf(item.getCantidad()), normalFont, Element.ALIGN_CENTER);
+                agregarCeldaItem(table, comprobante.getVenta().getMoneda() + " " + item.getPrecioUnitario().setScale(2, java.math.RoundingMode.HALF_UP), normalFont, Element.ALIGN_RIGHT);
+                agregarCeldaItem(table, porcentaje(item.getDescuentoPorcentaje()), normalFont, Element.ALIGN_CENTER);
+                agregarCeldaItem(table, comprobante.getVenta().getMoneda() + " " + item.calcularSubtotalDetalle().setScale(2, java.math.RoundingMode.HALF_UP), normalFont, Element.ALIGN_RIGHT);
+            }
+            document.add(table);
+            
+            // Tabla de Totales
+            document.add(new Paragraph(" "));
+            PdfPTable totalesTable = new PdfPTable(2);
+            totalesTable.setWidthPercentage(40);
+            totalesTable.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            totalesTable.setWidths(new float[]{1f, 1f});
+            
+            agregarCeldaTotal(totalesTable, "OP. GRAVADA:", normalFont);
+            agregarCeldaTotal(totalesTable, comprobante.getVenta().getMoneda() + " " + comprobante.getVenta().calcularSubtotal(), normalFont);
+            
+            agregarCeldaTotal(totalesTable, "IGV (18%):", normalFont);
+            agregarCeldaTotal(totalesTable, comprobante.getVenta().getMoneda() + " " + comprobante.getVenta().calcularIgv(), normalFont);
+            
+            agregarCeldaTotal(totalesTable, "IMPORTE TOTAL:", boldFont);
+            agregarCeldaTotal(totalesTable, comprobante.getVenta().getMoneda() + " " + comprobante.getVenta().calcularTotal(), boldFont);
+
+            // Detracción (SPOT) o retención del IGV: lo que el cliente no le paga a JD directamente
+            Venta venta = comprobante.getVenta();
+            boolean conDeduccion = venta.getTipoDeduccion() != null && venta.getTipoDeduccion() != Venta.TipoDeduccion.NINGUNA;
+            if (conDeduccion) {
+                String nombre = venta.getTipoDeduccion() == Venta.TipoDeduccion.DETRACCION ? "DETRACCIÓN" : "RETENCIÓN";
+                agregarCeldaTotal(totalesTable, nombre + " (" + porcentaje(venta.getPorcentajeDeduccion()) + "):", normalFont);
+                agregarCeldaTotal(totalesTable, venta.getMoneda() + " " + venta.getMontoDeduccion(), normalFont);
+                agregarCeldaTotal(totalesTable, "NETO A PAGAR:", boldFont);
+                agregarCeldaTotal(totalesTable, venta.getMoneda() + " " + venta.calcularNetoACobrar(), boldFont);
+            }
+            
+            document.add(totalesTable);
+
+            if (conDeduccion && venta.getTipoDeduccion() == Venta.TipoDeduccion.DETRACCION) {
+                String cuenta = empresa.cuentaDetracciones() != null && !empresa.cuentaDetracciones().isBlank()
+                        ? empresa.cuentaDetracciones() : "(cuenta por confirmar)";
+                document.add(new Paragraph(" "));
+                document.add(new Paragraph("Operación sujeta al Sistema de Pago de Obligaciones Tributarias (SPOT): detracción de "
+                        + porcentaje(venta.getPorcentajeDeduccion()) + " por " + venta.getMoneda() + " " + venta.getMontoDeduccion()
+                        + ", a depositar en la cuenta de detracciones del Banco de la Nación N° " + cuenta + ".", smallFont));
+            } else if (conDeduccion) {
+                document.add(new Paragraph(" "));
+                document.add(new Paragraph("Operación sujeta a retención del IGV (" + porcentaje(venta.getPorcentajeDeduccion())
+                        + "): el cliente, agente de retención, entrega el comprobante de retención por "
+                        + venta.getMoneda() + " " + venta.getMontoDeduccion() + ".", smallFont));
+            }
+            
+            // Texto final
+            document.add(new Paragraph(" "));
+            document.add(new Paragraph("Representación impresa de la " + tipoTexto + ".", smallFont));
+            document.add(new Paragraph("Consulte su documento electrónico en nuestro portal.", smallFont));
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Error al generar el PDF de facturación", e);
+        }
+        
+        return pdfFile;
+    }
+    
+    private static String porcentaje(java.math.BigDecimal descuento) {
+        return descuento.signum() > 0 ? descuento.stripTrailingZeros().toPlainString() + " %" : "—";
+    }
+
+    private void agregarCeldaCabecera(PdfPTable table, String texto, Font font) {
+        PdfPCell celda = new PdfPCell(new Phrase(texto, font));
+        celda.setBackgroundColor(new Color(230, 230, 230));
+        celda.setPadding(8f);
+        celda.setHorizontalAlignment(Element.ALIGN_CENTER);
+        table.addCell(celda);
+    }
+    
+    private void agregarCeldaItem(PdfPTable table, String texto, Font font, int alineacion) {
+        PdfPCell celda = new PdfPCell(new Phrase(texto, font));
+        celda.setPadding(8f);
+        celda.setHorizontalAlignment(alineacion);
+        table.addCell(celda);
+    }
+    
+    private void agregarCeldaTotal(PdfPTable table, String texto, Font font) {
+        PdfPCell celda = new PdfPCell(new Phrase(texto, font));
+        celda.setBorder(Rectangle.NO_BORDER);
+        celda.setPadding(5f);
+        celda.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        table.addCell(celda);
+    }
+}

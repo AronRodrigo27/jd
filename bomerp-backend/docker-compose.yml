@@ -1,0 +1,70 @@
+name: SGE-JD
+# Contraseñas: en .env (no se versiona; plantilla en .env.example).
+# Puertos solo en 127.0.0.1: las bases y la consola de Keycloak no quedan expuestas a la red.
+
+services:
+  SGE-JD:
+    image: gvenzl/oracle-free:23-slim
+    container_name: SGE-JD
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1522:1521"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?Falta ORACLE_PASSWORD en .env (ver .env.example)}
+      APP_USER: "jdrefrigeracion"
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:?Falta APP_USER_PASSWORD en .env}
+      # Hora de Lima, como en compose-prod.yml (BD2 S2: sin esto SYSDATE va en UTC, 5 h adelante, y una venta
+      # registrada de noche queda con la fecha de mañana en la auditoría y en LOG_ERRORES)
+      TZ: America/Lima
+    volumes:
+      - sge-jd-oracle-data:/opt/oracle/oradata
+
+  # ── Identidad (S10b): Keycloak con su propio Postgres, separado del Oracle de negocio ──
+  keycloak-db:
+    image: postgres:17-alpine
+    container_name: sge-jd-keycloak-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:35432:5432"
+    environment:
+      POSTGRES_DB: sgejd_keycloak
+      POSTGRES_USER: sgejd_keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?Falta KC_DB_PASSWORD en .env}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sgejd_keycloak -d sgejd_keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    container_name: sge-jd-keycloak
+    restart: unless-stopped
+    # --import-realm carga keycloak/realm-bomerp.json la primera vez (si el realm ya existe, lo omite)
+    command: start-dev --import-realm
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:38080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?Falta KC_ADMIN_PASSWORD en .env}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/sgejd_keycloak
+      KC_DB_USERNAME: sgejd_keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?Falta KC_DB_PASSWORD en .env}
+      # Memoria acotada: la laptop de desarrollo también corre Oracle, el backend y el SPA
+      JAVA_OPTS_KC_HEAP: "-Xms64m -Xmx512m"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak:/opt/keycloak/data/import:ro
+
+volumes:
+  sge-jd-oracle-data:
+    external: true
+  keycloak-data:
+  keycloak-db-data:

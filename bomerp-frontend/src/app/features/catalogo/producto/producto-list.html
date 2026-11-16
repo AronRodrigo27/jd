@@ -1,0 +1,115 @@
+<!-- Ruta en el repositorio: src/app/features/catalogo/producto/producto-list.html -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-0" style="font-weight: 700;">Productos</h2>
+    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.9rem;">
+      Equipos y materiales del catálogo, cada uno con su categoría
+    </p>
+  </div>
+  @if (puedeCatalogo()) {
+    <a routerLink="/catalogo/productos/nuevo" class="btn btn-primary">+ Nuevo Producto</a>
+  }
+</div>
+
+<div class="card d-flex align-items-center gap-3" style="padding: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+  <label class="form-label mb-0" for="filtroCategoria">Categoría</label>
+  <select id="filtroCategoria" class="form-select filtro-select" [(ngModel)]="filtro" (ngModelChange)="cargar()">
+    <option [ngValue]="'TODAS'">Todas</option>
+    @for (c of categorias(); track c.id) {
+      <option [ngValue]="c.id">{{ c.nombre }}</option>
+    }
+    <option [ngValue]="'SIN_CATEGORIA'">Sin categoría (por asignar)</option>
+  </select>
+<!-- CAMBIO SOLICITADO (líneas 23–34): agrega rango inclusivo en soles (sin IGV); cada extremo es opcional. -->
+  <label class="form-label mb-0" for="precioMinimo">Precio desde (S/)</label>
+  <input id="precioMinimo" class="form-control" type="number" min="0" step="0.01" style="width: 130px;"
+    placeholder="Sin mínimo" [(ngModel)]="precioMinimo" />
+  <label class="form-label mb-0" for="precioMaximo">hasta (S/)</label>
+  <input id="precioMaximo" class="form-control" type="number" min="0" step="0.01" style="width: 130px;"
+    placeholder="Sin máximo" [(ngModel)]="precioMaximo" />
+  @if (precioMinimo !== null && precioMaximo !== null && precioMinimo > precioMaximo) {
+    <span class="text-danger">El mínimo no puede superar al máximo.</span>
+  }
+  <small style="color: var(--text-muted);">Precios sin IGV; los de dólares se convierten al tipo de cambio de hoy.</small>
+  <span style="color: var(--text-muted); font-size: 0.88rem;">{{ visibles().length }} producto(s)</span>
+</div>
+@if (sinCategoria() > 0 && filtro !== 'SIN_CATEGORIA') {
+  <div class="alert alert-info" role="status">
+    <app-icono nombre="alerta" /> Hay {{ sinCategoria() }} producto(s) sin categoría.
+    <button class="btn btn-sm btn-secondary" style="margin-left: 8px;" (click)="verSinCategoria()">Ver y asignar</button>
+  </div>
+}
+@if (error()) {
+  <div class="alert alert-danger" role="alert"><app-icono nombre="alerta" /> {{ error() }}</div>
+}
+@if (mensaje()) {
+  <div class="alert alert-info" role="status">{{ mensaje() }}</div>
+}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th><app-orden campo="nombre" [orden]="orden()" (cambiar)="orden.set($event)">Nombre</app-orden></th>
+          <th style="width: 150px;"><app-orden campo="categoria" [orden]="orden()" (cambiar)="orden.set($event)">Categoría</app-orden></th>
+          <th style="width: 150px;"><app-orden campo="sector" [orden]="orden()" (cambiar)="orden.set($event)">Sector</app-orden></th>
+          <th style="width: 130px; text-align: right;"><app-orden campo="precio" primero="desc" [orden]="orden()" (cambiar)="orden.set($event)">Precio (sin IGV)</app-orden></th>
+          <th class="text-center" style="width: 110px;"><app-orden campo="stock" [orden]="orden()" (cambiar)="orden.set($event)">Stock</app-orden></th>
+          <th style="width: 240px; text-align: right;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">Cargando…</td></tr>
+        }
+        @for (p of visibles(); track p.id) {
+          <tr>
+            <td>
+              <strong style="color: var(--text-main);">{{ p.nombre }}</strong>
+              @if (!p.visibleEnCatalogo) {
+                <span class="badge" style="margin-left: 6px; background-color: var(--suave); color: var(--text-muted);">Oculto</span>
+              }
+            </td>
+            <td>
+              @if (p.categoriaNombre) {
+                <span class="badge" style="background-color: var(--primary-light); color: var(--primary);">{{ p.categoriaNombre }}</span>
+              } @else {
+                <span class="badge badge-warning">Sin categoría</span>
+              }
+            </td>
+            <td style="color: var(--text-muted); font-size: 0.9rem;">{{ etiquetaSector(p.sector) }}</td>
+            <td style="text-align: right; font-weight: 600;">{{ simbolo(p.moneda) }} {{ p.precioVenta | number: '1.2-2' }}</td>
+            <td class="text-center">
+              @if (controlaStock(p.sector)) {
+                <span [style.color]="(p.stockActual ?? 0) <= (p.stockMinimo ?? 0) ? 'var(--danger)' : 'inherit'"
+                      [title]="'Mínimo: ' + (p.stockMinimo ?? 0)">
+                  {{ p.stockActual ?? 0 }}
+                </span>
+              } @else {
+                <span style="color: var(--text-muted);" title="Los equipos no controlan stock">—</span>
+              }
+            </td>
+            <td style="text-align: right; white-space: nowrap;">
+              <a class="btn btn-secondary btn-sm" [routerLink]="['/catalogo/productos', p.id, 'kardex']">Kardex</a>
+              @if (puedeCatalogo()) {
+                <a class="btn btn-outline-secondary btn-sm" style="margin-left: 6px;" [routerLink]="['/catalogo/productos', p.id, 'editar']">Editar</a>
+                <button class="btn btn-danger btn-sm" style="margin-left: 8px;" (click)="eliminar(p)">Eliminar</button>
+              }
+            </td>
+          </tr>
+        } @empty {
+          @if (!loading()) {
+            <tr>
+              <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                No hay productos con ese filtro.
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- Resumen del cambio (líneas 23–34): se añadieron los campos, el aviso de rango inválido y el conteo actualizado. -->
+<!-- Flujo: ngModel actualiza límites en ProductoList; visibles() aplica el rango junto con categoría, sin escribir en servidor. -->

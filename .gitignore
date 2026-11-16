@@ -1,0 +1,22 @@
+# Runtime state and credentials: never commit these.
+.cache/
+logs/
+**/.env
+**/.env.*
+!**/.env.example
+**/data/
+
+# Dependencies and generated outputs.
+**/node_modules/
+**/target/
+**/dist/
+**/build/
+
+# Downloaded tool distributions and archives.
+herramientas/keycloak-*/
+herramientas/keycloak-*.zip
+
+# Nested repository metadata and local IDE configuration.
+**/.git/
+**/.idea/
+**/.vscode/

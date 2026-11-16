@@ -1,0 +1,86 @@
+package com.bomerp.ventas.venta.dto;
+import com.bomerp.ventas.venta.entity.Venta;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+public record VentaResponseDTO(
+        Long id,
+        Long clienteId,
+        String clienteNombre,
+        Long proformaOrigenId,
+        LocalDate fechaVenta,
+        String tipoPago,
+        String estado,
+        String estadoPago,
+        LocalDate fechaLimitePago,
+        String moneda,
+        BigDecimal tipoCambio,
+        BigDecimal subtotal,
+        BigDecimal igv,
+        BigDecimal total,
+        Long comprobanteId,
+        String registradoPor,
+        String tipoDeduccion,
+        BigDecimal porcentajeDeduccion,
+        BigDecimal montoDeduccion,
+        BigDecimal netoACobrar,
+        List<DetalleResponseDTO> detalles,
+        LocalDate fechaAnulacion,
+        String anuladoPor,
+        String motivoAnulacion
+) {
+    public record DetalleResponseDTO(
+            String productoNombre,
+            Integer cantidad,
+            BigDecimal precioUnitario,
+            BigDecimal descuentoPorcentaje,
+            BigDecimal subtotalDetalle,
+            /** Precio editado al registrar (auditoría M1): el de catálogo, quién y por qué; null = de catálogo. */
+            BigDecimal precioCatalogo,
+            String precioEditadoPor,
+            String motivoPrecio
+    ) {}
+
+    public static VentaResponseDTO desdeEntidad(Venta v) {
+        List<DetalleResponseDTO> detalles = v.getDetalles().stream()
+                .map(d -> new DetalleResponseDTO(
+                        d.getProducto().getNombre(),
+                        d.getCantidad(),
+                        d.getPrecioUnitario(),
+                        d.getDescuentoPorcentaje(),
+                        d.calcularSubtotalDetalle(),
+                        d.getPrecioCatalogo(),
+                        d.getPrecioEditadoPor(),
+                        d.getMotivoPrecio()))
+                .toList();
+
+        return new VentaResponseDTO(
+                v.getId(),
+                v.getCliente().getId(),
+                v.getCliente().getNombreORazonSocial(),
+                v.getProformaOrigen() != null ? v.getProformaOrigen().getId() : null,
+                v.getFechaVenta(),
+                v.getTipoPago().name(),
+                v.getEstado().name(),
+                v.getEstadoPago().name(),
+                v.getFechaLimitePago(),
+                v.getMoneda().name(),
+                v.getTipoCambio(),
+                v.calcularSubtotal(),
+                v.calcularIgv(),
+                v.calcularTotal(),
+                v.getComprobanteId(),
+                v.getVendedorNombre(),
+                v.getTipoDeduccion().name(),
+                v.getPorcentajeDeduccion(),
+                v.getMontoDeduccion(),
+                v.calcularNetoACobrar(),
+                detalles,
+                v.getFechaAnulacion(),
+                v.getAnuladoPor(),
+                v.getMotivoAnulacion()
+        );
+    }
+}

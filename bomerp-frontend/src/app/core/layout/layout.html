@@ -1,0 +1,120 @@
+<div class="app" [class.con-sesion]="auth.autenticado()" [class.menu-abierto]="menuAbierto()">
+
+  <!-- ── Barra superior ── -->
+  <header class="barra">
+    <a routerLink="/" class="marca" aria-label="SGE-JD, ir al inicio">
+      <span class="marca-icono" aria-hidden="true">JD</span>
+      <span class="marca-texto">SGE-JD</span>
+    </a>
+
+    @if (auth.autenticado()) {
+      <!-- Grupos del menú, en píldoras -->
+      <nav class="grupos" aria-label="Secciones">
+        @for (g of grupos; track g.id) {
+          <a [routerLink]="destinoDe(g)" class="grupo" [class.activo]="grupoActivo().id === g.id"
+             [attr.aria-current]="grupoActivo().id === g.id ? 'page' : null">{{ g.titulo }}</a>
+        }
+      </nav>
+
+      <div class="barra-derecha">
+        <app-buscador class="barra-buscador" />
+        <!-- Tema: el contrario del que se ve; en Configuración se elige también "como el sistema" -->
+        <button type="button" class="boton-redondo" (click)="preferencias.alternarTema()"
+                [attr.aria-label]="preferencias.oscuro() ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'"
+                [title]="preferencias.oscuro() ? 'Tema claro' : 'Tema oscuro'">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="preferencias.oscuro() ? iconos.sol : iconos.luna" /></svg>
+        </button>
+        <app-alertas />
+
+        <!-- Usuario: rol y cerrar sesión -->
+        @if (auth.usuario(); as u) {
+          <div class="usuario">
+            <button type="button" class="usuario-boton" (click)="alternarUsuario()" [attr.aria-expanded]="usuarioAbierto()"
+                    [attr.aria-label]="'Menú de ' + (u.nombre || u.username)">
+              <span class="avatar" aria-hidden="true">{{ iniciales(u.nombre || u.username) }}</span>
+              <svg class="usuario-flecha" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            @if (usuarioAbierto()) {
+              <div class="usuario-panel" role="menu">
+                <div class="usuario-datos">
+                  <span class="avatar avatar-grande" aria-hidden="true">{{ iniciales(u.nombre || u.username) }}</span>
+                  <span><strong>{{ u.nombre || u.username }}</strong>
+                    <small>{{ u.roles.includes('ADMIN') ? 'Administrador' : 'Asistente' }} · {{ u.username }}</small></span>
+                </div>
+                <a routerLink="/configuracion" class="usuario-opcion" role="menuitem">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.engranaje" /></svg> Configuración
+                </a>
+                @if (u.roles.includes('ADMIN')) {
+                  <a routerLink="/configuracion/permisos" class="usuario-opcion" role="menuitem">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.escudo" /></svg> Usuarios y permisos
+                  </a>
+                  <a routerLink="/configuracion/historial" class="usuario-opcion" role="menuitem">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.historial" /></svg> Historial de cambios
+                  </a>
+                }
+                <button id="btn-logout" type="button" class="usuario-salir" role="menuitem" (click)="logout()"
+                        title="Cerrar sesión (también en Keycloak)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.salir" /></svg> Cerrar sesión
+                </button>
+              </div>
+            }
+          </div>
+        }
+
+        <button type="button" class="boton-redondo barra-menu" (click)="alternarMenu()"
+                [attr.aria-expanded]="menuAbierto()" aria-controls="menu-completo"
+                [attr.aria-label]="menuAbierto() ? 'Cerrar menú' : 'Abrir menú'">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.menu" /></svg>
+        </button>
+      </div>
+    } @else {
+      <button type="button" class="btn btn-primary barra-login" (click)="auth.iniciarLogin('/')">Iniciar sesión</button>
+    }
+  </header>
+
+  @if (auth.autenticado()) {
+    <!-- ── Riel izquierdo: módulos del grupo activo ── -->
+    <aside class="riel" [attr.aria-label]="'Módulos de ' + grupoActivo().titulo">
+      <nav class="riel-grupo">
+        @for (op of opcionesRiel(); track op.ruta) {
+          <a [routerLink]="op.ruta" class="riel-opcion" [class.activo]="activa(op.ruta)" [class.riel-opcion-admin]="!!op.permiso"
+             [attr.data-tooltip]="op.texto + (op.permiso ? ' (requiere permiso)' : '')" [attr.aria-label]="op.texto">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="op.icono" /></svg>
+          </a>
+        }
+      </nav>
+      <div class="riel-grupo">
+        <a routerLink="/configuracion" class="riel-opcion" [class.activo]="activa('/configuracion')"
+           data-tooltip="Configuración" aria-label="Configuración">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.engranaje" /></svg>
+        </a>
+        <button type="button" class="riel-opcion" data-tooltip="Cerrar sesión" aria-label="Cerrar sesión" (click)="logout()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.salir" /></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ── Menú completo (tablet y celular) ── -->
+    <div class="menu-fondo" (click)="menuAbierto.set(false)" aria-hidden="true"></div>
+    <nav class="menu-completo" id="menu-completo" aria-label="Menú principal">
+      @for (g of grupos; track g.id) {
+        <p class="menu-titulo">{{ g.titulo }}</p>
+        @for (op of visibles(g); track op.ruta) {
+          <a [routerLink]="op.ruta" routerLinkActive="activo" [routerLinkActiveOptions]="{ exact: true }" class="menu-opcion">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="op.icono" /></svg>
+            <span>{{ op.texto }}</span>
+          </a>
+        }
+      }
+      <p class="menu-titulo">Cuenta</p>
+      <a routerLink="/configuracion" routerLinkActive="activo" class="menu-opcion">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="iconos.engranaje" /></svg>
+        <span>Configuración</span>
+      </a>
+    </nav>
+  }
+
+  <main class="main-container">
+    <router-outlet></router-outlet>
+  </main>
+</div>

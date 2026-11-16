@@ -1,0 +1,67 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Proveedores</h1>
+    <p class="page-sub">Directorio de proveedores registrados</p>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <input
+      id="buscar-proveedor"
+      type="search"
+      class="search-input"
+      placeholder="Buscar por nombre, RUC, DNI o correo..."
+      (input)="onBuscar($event)"
+    />
+    <a routerLink="/proveedores/nuevo" class="btn btn-primary" style="white-space: nowrap;">+ Nuevo Proveedor</a>
+  </div>
+</div>
+
+@if (mensaje()) {
+  <div class="alert alert-info" role="status">{{ mensaje() }}</div>
+}
+
+@if (cargando()) {
+  <div class="loading-state">Cargando proveedores…</div>
+} @else if (error()) {
+  <div class="error-state">{{ error() }}</div>
+} @else if (proveedoresFiltrados.length === 0) {
+  <div class="empty-state">No se encontraron proveedores.</div>
+} @else {
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th><app-orden campo="id" [orden]="orden()" (cambiar)="orden.set($event)">#</app-orden></th>
+          <th><app-orden campo="nombre" [orden]="orden()" (cambiar)="orden.set($event)">Nombre / Razón Social</app-orden></th>
+          <th><app-orden campo="tipo" [orden]="orden()" (cambiar)="orden.set($event)">Tipo</app-orden></th>
+          <th><app-orden campo="documento" [orden]="orden()" (cambiar)="orden.set($event)">RUC / DNI</app-orden></th>
+          <th>Teléfono</th>
+          <th>Correo</th>
+          <th style="text-align: right;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (prov of proveedoresFiltrados; track prov.id) {
+          <tr>
+            <td class="id-cell">{{ prov.id }}</td>
+            <td><strong>{{ prov.nombreORazonSocial }}</strong></td>
+            <td>
+              <span class="badge" [class.badge-empresa]="prov.tipo === 'EMPRESA'">
+                {{ prov.tipo === 'EMPRESA' ? 'Empresa' : 'Persona natural' }}
+              </span>
+            </td>
+            <td>{{ prov.ruc ?? prov.dni ?? '—' }}</td>
+            <td>{{ prov.telefono ?? '—' }}</td>
+            <td>{{ prov.correo ?? '—' }}</td>
+            <td style="text-align: right; white-space: nowrap;">
+              <a class="btn btn-secondary btn-sm" [routerLink]="['/proveedores', prov.id, 'historial']">Historial</a>
+              <a class="btn btn-outline-secondary btn-sm" style="margin-left: 6px;" [routerLink]="['/proveedores', prov.id, 'editar']">Editar</a>
+              @if (puedeEliminar()) {
+                <button class="btn btn-danger btn-sm" style="margin-left: 6px;" (click)="eliminar(prov)">Eliminar</button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}
