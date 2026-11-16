@@ -1,8 +1,14 @@
 param([Parameter(Mandatory=$true)][ValidateSet('keycloak','backend','frontend')][string]$Servicio)
 $ErrorActionPreference = 'Stop'
 $raiz = Split-Path $PSScriptRoot -Parent
-$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
-$env:Path = "$env:JAVA_HOME\bin;C:\apache-maven-3.9.11\bin;C:\Program Files\nodejs;$env:Path"
+$java = Get-Command java.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+$maven = Get-Command mvn.cmd -ErrorAction SilentlyContinue | Select-Object -First 1
+$node = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $java) { throw 'Falta Java 21 en PATH.' }
+if (-not $maven) { throw 'Falta Maven en PATH.' }
+if (-not $node) { throw 'Falta Node.js en PATH.' }
+$env:JAVA_HOME = Split-Path (Split-Path $java.Source -Parent) -Parent
+$env:Path = "$env:JAVA_HOME\bin;$(Split-Path $maven.Source -Parent);$(Split-Path $node.Source -Parent);$env:Path"
 $env:JAVA_TOOL_OPTIONS = '-Duser.timezone=America/Lima'
 switch ($Servicio) {
     'keycloak' {
